@@ -13,8 +13,13 @@ import os
 import socket
 import time
 import platform
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+try:
+    import ntplib
+    HAS_NTPLIB = True
+except ImportError:
+    HAS_NTPLIB = False
 try:
     import matplotlib
     matplotlib.use('Agg')  # Use non-interactive backend
@@ -37,6 +42,183 @@ def get_platform_type():
         return 'linux'
     else:
         return 'unix'  # Generic Unix-like
+
+
+def query_ntp_time(ntp_server='pool.ntp.org'):
+    """Query NTP server to get accurate time and calculate offset"""
+    try:
+        if HAS_NTPLIB:
+            # Use ntplib if available (more accurate)
+            client = ntplib.NTPClient()
+            response = client.request(ntp_server, version=3, timeout=5)
+            ntp_time = datetime.fromtimestamp(response.tx_time, tz=timezone.utc)
+            local_time = datetime.now(timezone.utc)
+            offset_seconds = (local_time - ntp_time).total_seconds()
+            return {
+                'success': True,
+                'ntp_time': ntp_time,
+                'local_time': local_time,
+                'offset_seconds': offset_seconds,
+                'offset_ms': offset_seconds * 1000,
+                'server': ntp_server
+            }
+        else:
+            # Fallback: Use system commands (less accurate but works)
+            # This is a simplified approach - actual NTP query would be more complex
+            # For now, we'll just check system sync status
+            return {'success': False, 'error': 'ntplib not available'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def check_time_sync_status(platform_type):
+    """Check if system time is synchronized with NTP"""
+    try:
+        if platform_type == 'windows':
+            # Check Windows Time service status
+            result = subprocess.run(
+                ['w32tm', '/query', '/status'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            output = result.stdout.lower()
+            
+            # Check if time source is available
+            if 'source:' in output:
+                # Extract source
+                for line in output.split('\n'):
+                    if 'source:' in line:
+                        source = line.split('source:')[1].strip()
+                        if source and source != 'local cmos clock':
+                            return {'synced': True, 'source': source}
+            
+            # Check last successful sync
+            result = subprocess.run(
+                ['w32tm', '/query', '/source'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            source = result.stdout.strip()
+            if source and source.lower() != 'local cmos clock':
+                return {'synced': True, 'source': source}
+            else:
+                return {'synced': False, 'source': 'Local clock'}
+                
+        else:
+            # Mac/Linux: Check if NTP is configured
+            # Try to check chronyd (Linux) or sntp (Mac)
+            try:
+                result = subprocess.run(
+                    ['chronyd', '-t'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                # If chronyd exists, assume it's managing time
+                return {'synced': True, 'source': 'chronyd'}
+            except:
+                pass
+            
+            # Check ntpq (if available)
+            try:
+                result = subprocess.run(
+                    ['ntpq', '-p'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0 and '*' in result.stdout:
+                    return {'synced': True, 'source': 'ntpd'}
+            except:
+                pass
+            
+            # Check timed (systemd-timesyncd on Linux)
+            try:
+                result = subprocess.run(
+                    ['timedatectl', 'status'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if 'synchronized: yes' in result.stdout.lower():
+                    return {'synced': True, 'source': 'systemd-timesyncd'}
+            except:
+                pass
+            
+            return {'synced': False, 'source': 'Unknown'}
+            
+    except Exception as e:
+        return {'synced': False, 'source': f'Error: {str(e)}'}
+
+
+def attempt_time_sync(platform_type, ntp_server='pool.ntp.org'):
+    """Attempt to synchronize system time with NTP server (requires admin/root)"""
+    try:
+        if platform_type == 'windows':
+            # Windows: Use w32tm to sync
+            print(f"\nAttempting to sync time with {ntp_server}...")
+            print("Note: This requires administrator privileges.")
+            
+            result = subprocess.run(
+                ['w32tm', '/config', '/manualpeerlist', ntp_server, '/syncfromflags:manual', '/reliable:yes', '/update'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                # Force resync
+                result2 = subprocess.run(
+                    ['w32tm', '/resync'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result2.returncode == 0:
+                    return {'success': True, 'message': 'Time synchronized successfully'}
+                else:
+                    return {'success': False, 'message': f'Resync failed: {result2.stderr}'}
+            else:
+                return {'success': False, 'message': f'Config failed: {result.stderr}'}
+        else:
+            # Mac/Linux: Use sntp or ntpdate (requires root)
+            print(f"\nAttempting to sync time with {ntp_server}...")
+            print("Note: This requires root/administrator privileges.")
+            
+            # Try sntp first (Mac and modern Linux)
+            try:
+                result = subprocess.run(
+                    ['sudo', 'sntp', '-s', ntp_server],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    return {'success': True, 'message': 'Time synchronized successfully'}
+            except:
+                pass
+            
+            # Fallback to ntpdate
+            try:
+                result = subprocess.run(
+                    ['sudo', 'ntpdate', '-u', ntp_server],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    return {'success': True, 'message': 'Time synchronized successfully'}
+                else:
+                    return {'success': False, 'message': f'Sync failed: {result.stderr}'}
+            except Exception as e:
+                return {'success': False, 'message': f'Command not available: {str(e)}'}
+                
+    except Exception as e:
+        return {'success': False, 'message': f'Error: {str(e)}'}
+    
+    return {'success': False, 'message': 'No sync method available'}
 
 
 class PingTarget:
@@ -315,16 +497,32 @@ class PingTarget:
         elif result['status'] == 'timeout':
             self.timeout_count += 1
     
-    def write_header(self):
+    def write_header(self, time_sync_info=None):
         """Write header information to log file"""
+        start_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        
+        # Add time sync information if available
+        time_sync_text = ""
+        if time_sync_info:
+            if time_sync_info.get('synced'):
+                time_sync_text = f"Time Sync: Synchronized ({time_sync_info.get('source', 'NTP')})\n"
+            else:
+                time_sync_text = f"Time Sync: NOT Synchronized ({time_sync_info.get('source', 'Local clock')})\n"
+                time_sync_text += "WARNING: Time may not be accurate across multiple computers!\n"
+            
+            if 'offset_ms' in time_sync_info and time_sync_info['offset_ms'] is not None:
+                offset = time_sync_info['offset_ms']
+                if abs(offset) > 100:  # More than 100ms offset
+                    time_sync_text += f"Time Offset: {offset:.2f}ms from NTP server\n"
+        
         header = f"""
 {'='*80}
 Ping Diagnostic Log
 {'='*80}
 Computer Name: {self.computer_name}
 Target IP: {self.target_ip}
-Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}
-Log File: {self.log_path.absolute()}
+Start Time: {start_time}
+{time_sync_text}Log File: {self.log_path.absolute()}
 {'='*80}
 
 """
@@ -472,11 +670,15 @@ Average Duration: {avg_duration:.2f}ms
 
 
 class PingDiagnostic:
-    def __init__(self, targets, log_prefix=None, computer_name=None, debug=False):
+    def __init__(self, targets, log_prefix=None, computer_name=None, debug=False, sync_time=False):
         self.running = True
         self.computer_name = computer_name or self.get_computer_name()
         self.log_prefix = log_prefix or f"ping_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.debug = debug
+        self.platform = get_platform_type()
+        
+        # Check and handle time synchronization
+        self.time_sync_info = self.check_and_sync_time(sync_time)
         
         # Create ping targets
         self.targets = []
@@ -490,6 +692,64 @@ class PingDiagnostic:
         # Setup signal handler for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
+    
+    def check_and_sync_time(self, force_sync=False):
+        """Check time sync status and optionally sync"""
+        print("\n" + "="*80)
+        print("Time Synchronization Check")
+        print("="*80)
+        
+        # Check system sync status
+        sync_status = check_time_sync_status(self.platform)
+        
+        # Query NTP server to get time offset
+        ntp_result = query_ntp_time()
+        
+        time_sync_info = {
+            'synced': sync_status.get('synced', False),
+            'source': sync_status.get('source', 'Unknown'),
+            'offset_ms': None
+        }
+        
+        if ntp_result.get('success'):
+            offset_ms = ntp_result.get('offset_ms', 0)
+            time_sync_info['offset_ms'] = offset_ms
+            print(f"NTP Server: {ntp_result.get('server', 'pool.ntp.org')}")
+            print(f"Time Offset: {offset_ms:.2f}ms")
+            
+            if abs(offset_ms) > 1000:  # More than 1 second
+                print(f"⚠️  WARNING: Large time offset detected ({offset_ms:.2f}ms)")
+                print("   Timestamps may not be accurate across multiple computers!")
+        else:
+            if not HAS_NTPLIB:
+                print("Note: Install 'ntplib' for accurate time offset checking:")
+                print("      pip install ntplib")
+            else:
+                print(f"Could not query NTP server: {ntp_result.get('error', 'Unknown error')}")
+        
+        print(f"System Time Sync: {'✓ Synchronized' if time_sync_info['synced'] else '✗ NOT Synchronized'}")
+        print(f"Sync Source: {time_sync_info['source']}")
+        
+        if not time_sync_info['synced'] or (ntp_result.get('success') and abs(ntp_result.get('offset_ms', 0)) > 1000):
+            print("\n⚠️  WARNING: Time may not be synchronized across multiple computers!")
+            print("   For accurate correlation of logs from multiple devices, ensure:")
+            print("   - System time is synchronized with NTP")
+            print("   - All computers use the same NTP server")
+            if force_sync:
+                print("\nAttempting to synchronize time...")
+                sync_result = attempt_time_sync(self.platform)
+                if sync_result.get('success'):
+                    print(f"✓ {sync_result.get('message')}")
+                    time_sync_info['synced'] = True
+                else:
+                    print(f"✗ {sync_result.get('message')}")
+                    print("   You may need to run with administrator/root privileges")
+            else:
+                print("\n   Use --sync-time to attempt automatic time synchronization")
+        
+        print("="*80 + "\n")
+        
+        return time_sync_info
     
     def get_computer_name(self):
         """Get the computer name"""
@@ -510,9 +770,9 @@ class PingDiagnostic:
     
     def run(self, interval=1):
         """Run continuous ping diagnostic for all targets"""
-        # Write headers for all targets
+        # Write headers for all targets (with time sync info)
         for target in self.targets:
-            target.write_header()
+            target.write_header(self.time_sync_info)
         
         print("="*80)
         print("Ping Diagnostic Tool")
@@ -645,10 +905,12 @@ def main():
     
     targets = []
     
-    # Check command line arguments
-    if len(sys.argv) > 1:
+    # Check command line arguments (filter out flags)
+    args = [arg for arg in sys.argv[1:] if not arg.startswith('--') and not arg.startswith('-')]
+    
+    if len(args) > 0:
         # User provided targets
-        targets = sys.argv[1].split(',')
+        targets = args[0].split(',')
         targets = [t.strip() for t in targets]
     else:
         # Use defaults: Eero gateway and Google DNS
@@ -671,22 +933,25 @@ def main():
     
     # Optional: custom log file prefix
     log_prefix = None
-    if len(sys.argv) > 2:
-        log_prefix = sys.argv[2]
+    if len(args) > 1:
+        log_prefix = args[1]
     
     # Optional: ping interval
     interval = 1
-    if len(sys.argv) > 3:
+    if len(args) > 2:
         try:
-            interval = float(sys.argv[3])
+            interval = float(args[2])
         except ValueError:
-            print(f"Warning: Invalid interval '{sys.argv[3]}', using default 1 second")
+            print(f"Warning: Invalid interval '{args[2]}', using default 1 second")
     
     # Optional: debug mode
     debug = '--debug' in sys.argv or '-d' in sys.argv
     
+    # Optional: sync time mode
+    sync_time = '--sync-time' in sys.argv or '--sync' in sys.argv
+    
     # Create and run diagnostic
-    diagnostic = PingDiagnostic(targets, log_prefix, debug=debug)
+    diagnostic = PingDiagnostic(targets, log_prefix, debug=debug, sync_time=sync_time)
     diagnostic.run(interval)
 
 

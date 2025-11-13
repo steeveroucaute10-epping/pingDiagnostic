@@ -2,6 +2,19 @@
 
 A Python tool for continuous network ping diagnostics with detailed timestamped logging. Perfect for diagnosing WiFi mesh network issues and providing logs to support teams.
 
+## Quick Install Dependencies
+
+To install all optional dependencies at once:
+```bash
+python -m pip install -r requirements.txt
+```
+
+Or install individually:
+```bash
+python -m pip install matplotlib  # For visualizations
+python -m pip install ntplib      # For accurate time sync checking
+```
+
 ## Features
 
 - ✅ **Dual Target Monitoring**: Automatically pings both your Eero gateway and Google DNS (8.8.8.8)
@@ -18,13 +31,15 @@ A Python tool for continuous network ping diagnostics with detailed timestamped 
 - ✅ **Graceful shutdown** with Ctrl+C
 - ✅ **Summary statistics** at the end of each session
 - ✅ **Auto-detects default gateway** (Eero router)
+- ✅ **Time Synchronization**: Checks and optionally syncs system time with NTP servers for accurate timestamps across multiple computers
 - ✅ **Easy to use command-line interface**
 
 ## Requirements
 
 - Python 3.6 or higher
 - **Cross-platform support**: Windows, macOS, and Linux
-- **matplotlib** (optional, for visualizations): `pip install matplotlib`
+- **matplotlib** (optional, for visualizations): `python -m pip install matplotlib`
+- **ntplib** (optional, for accurate time offset checking): `python -m pip install ntplib`
 
 ## Usage
 
@@ -53,6 +68,12 @@ python ping_diagnostic.py 192.168.1.1,8.8.8.8 my_network_test
 
 # Specify targets, log prefix, and ping interval (in seconds)
 python ping_diagnostic.py 192.168.1.1,8.8.8.8 my_network_test 2
+
+# With time synchronization (attempts to sync system time)
+python ping_diagnostic.py --sync-time
+
+# With debug mode
+python ping_diagnostic.py --debug
 ```
 
 ### Examples
@@ -127,7 +148,7 @@ Visualization files are saved as: `ping_log_YYYYMMDD_HHMMSS_IP_visualization.png
 
 **Note**: Visualizations require matplotlib. Install with:
 ```bash
-pip install matplotlib
+python -m pip install matplotlib
 ```
 
 If matplotlib is not installed, the tool will still work but skip visualization generation.
@@ -138,15 +159,53 @@ Simply attach **both log files and visualization images** to your email to Eero 
 
 **Pro Tip**: When running on multiple computers, the computer name in each log helps identify which device had issues.
 
+## Time Synchronization
+
+When running the script on multiple computers, accurate timestamps are crucial for correlating events. The script automatically:
+
+1. **Checks time sync status** - Verifies if your system time is synchronized with NTP
+2. **Queries NTP server** - Measures time offset from a central time server (if `ntplib` is installed)
+3. **Warns if unsynchronized** - Alerts you if time may not be accurate across computers
+4. **Logs sync status** - Includes time synchronization information in log file headers
+
+### Automatic Time Sync
+
+Use the `--sync-time` flag to attempt automatic time synchronization:
+
+```bash
+python ping_diagnostic.py --sync-time
+```
+
+**Note**: Time synchronization requires administrator/root privileges:
+- **Windows**: Run as Administrator
+- **Mac/Linux**: May require `sudo` or run as root
+
+### Manual Time Sync
+
+For best results, ensure all computers are synchronized before running:
+
+- **Windows**: `w32tm /resync` (run as Administrator)
+- **Mac**: System Preferences → Date & Time → Set time zone automatically
+- **Linux**: `sudo chronyd` or `sudo ntpdate pool.ntp.org`
+
+### Installing ntplib
+
+For accurate time offset measurement, install `ntplib`:
+
+```bash
+python -m pip install ntplib
+```
+
 ## Tips for Eero Support
 
 1. **Run on multiple devices**: The computer name in logs helps identify which device had connectivity issues
-2. **Compare gateway vs internet**: 
+2. **Synchronize time first**: Use `--sync-time` or manually sync time on all computers before running
+3. **Compare gateway vs internet**: 
    - If gateway pings fail → local network issue
    - If gateway succeeds but 8.8.8.8 fails → internet connectivity issue
-3. **Run for several minutes**: Capture enough data to show the pattern of issues
-4. **Note the time of issues**: The timestamps will help correlate with your experience
-5. **Common Eero gateway IPs**: `192.168.1.1`, `192.168.4.1`, or auto-detected
+4. **Run for several minutes**: Capture enough data to show the pattern of issues
+5. **Note the time of issues**: The timestamps will help correlate with your experience
+6. **Common Eero gateway IPs**: `192.168.1.1`, `192.168.4.1`, or auto-detected
 
 ## Troubleshooting
 
