@@ -10,6 +10,11 @@ A Python tool for continuous network ping diagnostics with detailed timestamped 
 - ✅ **Continuous ping monitoring** with precise timestamps (millisecond precision)
 - ✅ **Logs IP address, TTL, timeout status, and response time**
 - ✅ **Saves logs to text files** for easy email attachment
+- ✅ **Visualization Charts**: Automatically generates 4-panel visualization charts showing:
+  - Timeout events over time
+  - Average ping duration over time (with rolling average)
+  - Distribution of time between timeout events
+  - Percentage breakdown of ping status (success/timeout/other)
 - ✅ **Graceful shutdown** with Ctrl+C
 - ✅ **Summary statistics** at the end of each session
 - ✅ **Auto-detects default gateway** (Eero router)
@@ -18,7 +23,8 @@ A Python tool for continuous network ping diagnostics with detailed timestamped 
 ## Requirements
 
 - Python 3.6 or higher
-- Windows (uses Windows ping command)
+- **Cross-platform support**: Windows, macOS, and Linux
+- **matplotlib** (optional, for visualizations): `pip install matplotlib`
 
 ## Usage
 
@@ -108,9 +114,27 @@ Press `Ctrl+C` to stop the ping diagnostic. The script will:
 - Display the location of all log files
 - Show you're ready to attach files to email
 
+## Visualization
+
+The tool automatically generates comprehensive visualization charts when you stop the diagnostic (Ctrl+C). Each target gets its own visualization PNG file with 4 panels:
+
+1. **Timeout Events Over Time**: Shows when timeouts occurred as a timeline
+2. **Ping Duration Over Time**: Individual ping durations and rolling average
+3. **Time Between Timeout Events**: Histogram showing the distribution of intervals between timeouts
+4. **Ping Status Distribution**: Pie chart showing percentage of successful vs timeout pings
+
+Visualization files are saved as: `ping_log_YYYYMMDD_HHMMSS_IP_visualization.png`
+
+**Note**: Visualizations require matplotlib. Install with:
+```bash
+pip install matplotlib
+```
+
+If matplotlib is not installed, the tool will still work but skip visualization generation.
+
 ## Exporting Logs
 
-Simply attach **both log files** to your email to Eero support. The log files are plain text and can be opened in any text editor or email client.
+Simply attach **both log files and visualization images** to your email to Eero support. The log files are plain text and can be opened in any text editor or email client. The visualization PNG files provide a quick visual summary of network issues.
 
 **Pro Tip**: When running on multiple computers, the computer name in each log helps identify which device had issues.
 
