@@ -31,7 +31,7 @@ python -m pip install ntplib      # For accurate time sync checking
 - ✅ **Graceful shutdown** with Ctrl+C
 - ✅ **Summary statistics** at the end of each session
 - ✅ **Auto-detects default gateway** (Eero router)
-- ✅ **Time Synchronization**: Checks and optionally syncs system time with NTP servers for accurate timestamps across multiple computers
+- ✅ **Script-Level Time Synchronization**: Automatically adjusts all timestamps to NTP time (no root privileges required)
 - ✅ **Easy to use command-line interface**
 
 ## Requirements
@@ -159,52 +159,43 @@ Simply attach **both log files and visualization images** to your email to Eero 
 
 **Pro Tip**: When running on multiple computers, the computer name in each log helps identify which device had issues.
 
-## Time Synchronization
+## Time Synchronization (Script-Level)
 
-When running the script on multiple computers, accurate timestamps are crucial for correlating events. The script automatically:
+When running the script on multiple computers, accurate timestamps are crucial for correlating events. The script automatically performs **script-level time synchronization** - no root/administrator privileges required!
 
-1. **Checks time sync status** - Verifies if your system time is synchronized with NTP
-2. **Queries NTP server** - Measures time offset from a central time server (if `ntplib` is installed)
-3. **Warns if unsynchronized** - Alerts you if time may not be accurate across computers
-4. **Logs sync status** - Includes time synchronization information in log file headers
+### How It Works
 
-### Automatic Time Sync
+1. **Queries NTP server** - On startup, the script queries an NTP server (e.g., pool.ntp.org) to get accurate time
+2. **Calculates time offset** - Measures the difference between local system time and NTP time
+3. **Applies offset to all timestamps** - All timestamps in logs are automatically adjusted to NTP time
+4. **No system changes** - The system clock is not modified; only the logged timestamps are adjusted
 
-Use the `--sync-time` flag to attempt automatic time synchronization:
+### Benefits
 
-```bash
-python ping_diagnostic.py --sync-time
-```
-
-**Note**: Time synchronization requires administrator/root privileges:
-- **Windows**: Run as Administrator
-- **Mac/Linux**: May require `sudo` or run as root
-
-### Manual Time Sync
-
-For best results, ensure all computers are synchronized before running:
-
-- **Windows**: `w32tm /resync` (run as Administrator)
-- **Mac**: System Preferences → Date & Time → Set time zone automatically
-- **Linux**: `sudo chronyd` or `sudo ntpdate pool.ntp.org`
+- ✅ **No root/administrator privileges required** - Works for all users
+- ✅ **Automatic** - Happens automatically when the script starts
+- ✅ **Cross-computer accuracy** - All computers using the script will have synchronized timestamps
+- ✅ **Transparent** - Log headers show the offset being applied
 
 ### Installing ntplib
 
-For accurate time offset measurement, install `ntplib`:
+For accurate time synchronization, install `ntplib`:
 
 ```bash
 python -m pip install ntplib
 ```
 
+**Note**: If `ntplib` is not installed, the script will use local system time and warn you that timestamps may not be synchronized across computers.
+
 ## Tips for Eero Support
 
 1. **Run on multiple devices**: The computer name in logs helps identify which device had connectivity issues
-2. **Synchronize time first**: Use `--sync-time` or manually sync time on all computers before running
+2. **Time is automatically synchronized**: The script adjusts all timestamps to NTP time automatically - no setup needed!
 3. **Compare gateway vs internet**: 
    - If gateway pings fail → local network issue
    - If gateway succeeds but 8.8.8.8 fails → internet connectivity issue
 4. **Run for several minutes**: Capture enough data to show the pattern of issues
-5. **Note the time of issues**: The timestamps will help correlate with your experience
+5. **Note the time of issues**: The timestamps (NTP-adjusted) will help correlate with your experience across multiple computers
 6. **Common Eero gateway IPs**: `192.168.1.1`, `192.168.4.1`, or auto-detected
 
 ## Troubleshooting
