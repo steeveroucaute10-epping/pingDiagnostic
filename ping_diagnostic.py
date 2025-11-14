@@ -248,47 +248,68 @@ class PingTarget:
                 print(f"[DEBUG] stdout length: {len(result.stdout)}, stderr length: {len(result.stderr)}")
                 print(f"[DEBUG] Output preview (first 500 chars):\n{output[:500]}")
             
-            # Parse output
-            ping_result = self.parse_ping_output(output)
-            
-            # Mac/Linux: Check return code for timeout detection FIRST
-            # On Mac/Linux, ping returns non-zero exit code on timeout
-            # Return code 0 = success, 1 = no reply/timeout, 2 = other error
-            if self.platform != 'windows' and result.returncode != 0:
-                # Mac/Linux ping returns 1 on timeout (no reply), 2 on other errors
-                if result.returncode == 1:
-                    # No reply received - this is a timeout
-                    # Override parsing result if we got success or unknown
-                    if ping_result['status'] in ['success', 'unknown']:
+            # Mac/Linux: Check return code FIRST - it's the authoritative source
+            # On Mac/Linux, ping returns:
+            #   0 = success (got reply)
+            #   1 = timeout (no reply received)
+            #   2 = other error (host unreachable, etc.)
+            if self.platform != 'windows':
+                if result.returncode == 0:
+                    # Success - parse output to get details
+                    ping_result = self.parse_ping_output(output)
+                    # If parsing failed, try verbose parsing
+                    if ping_result['status'] == 'unknown':
+                        ping_result = self.parse_ping_output_verbose(output)
+                elif result.returncode == 1:
+                    # Return code 1 = timeout (no reply) - ALWAYS treat as timeout
+                    ping_result = {
+                        'status': 'timeout',
+                        'ttl': 'N/A',
+                        'time_ms': 'N/A'
+                    }
+                elif result.returncode == 2:
+                    # Return code 2 = other error - check if unreachable
+                    output_lower = output.lower()
+                    if 'unreachable' in output_lower or 'no route' in output_lower:
+                        ping_result = {
+                            'status': 'unreachable',
+                            'ttl': 'N/A',
+                            'time_ms': 'N/A'
+                        }
+                    else:
+                        # Unknown error, treat as timeout
                         ping_result = {
                             'status': 'timeout',
                             'ttl': 'N/A',
                             'time_ms': 'N/A'
                         }
-                elif result.returncode == 2:
-                    # Other error - only treat as timeout if not unreachable
-                    if ping_result['status'] in ['success', 'unknown']:
-                        if 'unreachable' not in output.lower() and 'no route' not in output.lower():
+                else:
+                    # Unexpected return code - parse output as fallback
+                    ping_result = self.parse_ping_output(output)
+                    if ping_result['status'] == 'unknown':
+                        # Default to timeout for non-zero return codes
+                        ping_result = {
+                            'status': 'timeout',
+                            'ttl': 'N/A',
+                            'time_ms': 'N/A'
+                        }
+            else:
+                # Windows: Parse output first, then check return code
+                ping_result = self.parse_ping_output(output)
+                
+                # If parsing failed and we got unknown, check return code
+                if ping_result['status'] == 'unknown':
+                    if result.returncode == 0:
+                        # Try to parse again with more lenient matching
+                        ping_result = self.parse_ping_output_verbose(output)
+                    else:
+                        # Windows: Check for common error patterns
+                        if 'timed out' in output.lower() or 'request timed out' in output.lower():
                             ping_result = {
                                 'status': 'timeout',
                                 'ttl': 'N/A',
                                 'time_ms': 'N/A'
                             }
-            
-            # If parsing failed and we got unknown, check return code
-            if ping_result['status'] == 'unknown':
-                # Return code 0 usually means success, non-zero means failure
-                if result.returncode == 0:
-                    # Try to parse again with more lenient matching
-                    ping_result = self.parse_ping_output_verbose(output)
-                elif self.platform == 'windows':
-                    # Windows: Check for common error patterns
-                    if 'timed out' in output.lower() or 'request timed out' in output.lower():
-                        ping_result = {
-                            'status': 'timeout',
-                            'ttl': 'N/A',
-                            'time_ms': 'N/A'
-                        }
             
         except subprocess.TimeoutExpired:
             # Ping command itself timed out
