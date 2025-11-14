@@ -69,8 +69,9 @@ python ping_diagnostic.py 192.168.1.1,8.8.8.8 my_network_test
 # Specify targets, log prefix, and ping interval (in seconds)
 python ping_diagnostic.py 192.168.1.1,8.8.8.8 my_network_test 2
 
-# With time synchronization (attempts to sync system time)
-python ping_diagnostic.py --sync-time
+# Configure ping frequency (interval between ping cycles)
+python ping_diagnostic.py --interval 0.5  # Ping every 0.5 seconds
+python ping_diagnostic.py -i 2            # Ping every 2 seconds
 
 # With debug mode
 python ping_diagnostic.py --debug

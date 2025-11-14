@@ -167,7 +167,13 @@ class PingTarget:
                 }
             
             # Check for timeout - multiple patterns
-            if 'request timed out' in line_lower or 'timed out' in line_lower:
+            # Windows: "Request timed out"
+            # Mac/Linux: "Request timeout for icmp_seq X" or "no answer yet"
+            if ('request timed out' in line_lower or 
+                'timed out' in line_lower or 
+                'request timeout' in line_lower or
+                'no answer yet' in line_lower or
+                '100% packet loss' in line_lower):
                 return {
                     'status': 'timeout',
                     'ttl': 'N/A',
@@ -245,14 +251,38 @@ class PingTarget:
             # Parse output
             ping_result = self.parse_ping_output(output)
             
+            # Mac/Linux: Check return code for timeout detection FIRST
+            # On Mac/Linux, ping returns non-zero exit code on timeout
+            # Return code 0 = success, 1 = no reply/timeout, 2 = other error
+            if self.platform != 'windows' and result.returncode != 0:
+                # Mac/Linux ping returns 1 on timeout (no reply), 2 on other errors
+                if result.returncode == 1:
+                    # No reply received - this is a timeout
+                    # Override parsing result if we got success or unknown
+                    if ping_result['status'] in ['success', 'unknown']:
+                        ping_result = {
+                            'status': 'timeout',
+                            'ttl': 'N/A',
+                            'time_ms': 'N/A'
+                        }
+                elif result.returncode == 2:
+                    # Other error - only treat as timeout if not unreachable
+                    if ping_result['status'] in ['success', 'unknown']:
+                        if 'unreachable' not in output.lower() and 'no route' not in output.lower():
+                            ping_result = {
+                                'status': 'timeout',
+                                'ttl': 'N/A',
+                                'time_ms': 'N/A'
+                            }
+            
             # If parsing failed and we got unknown, check return code
             if ping_result['status'] == 'unknown':
                 # Return code 0 usually means success, non-zero means failure
                 if result.returncode == 0:
                     # Try to parse again with more lenient matching
                     ping_result = self.parse_ping_output_verbose(output)
-                else:
-                    # Check for common error patterns
+                elif self.platform == 'windows':
+                    # Windows: Check for common error patterns
                     if 'timed out' in output.lower() or 'request timed out' in output.lower():
                         ping_result = {
                             'status': 'timeout',
@@ -823,9 +853,25 @@ def main():
     if len(args) > 1:
         log_prefix = args[1]
     
-    # Optional: ping interval
-    interval = 1
-    if len(args) > 2:
+    # Optional: ping interval (frequency)
+    interval = 1  # Default: 1 second between ping cycles
+    # Check for --interval or -i flag
+    if '--interval' in sys.argv:
+        idx = sys.argv.index('--interval')
+        if idx + 1 < len(sys.argv):
+            try:
+                interval = float(sys.argv[idx + 1])
+            except (ValueError, IndexError):
+                print(f"Warning: Invalid interval value, using default 1 second")
+    elif '-i' in sys.argv:
+        idx = sys.argv.index('-i')
+        if idx + 1 < len(sys.argv):
+            try:
+                interval = float(sys.argv[idx + 1])
+            except (ValueError, IndexError):
+                print(f"Warning: Invalid interval value, using default 1 second")
+    elif len(args) > 2:
+        # Legacy: interval as positional argument
         try:
             interval = float(args[2])
         except ValueError:
@@ -833,6 +879,10 @@ def main():
     
     # Optional: debug mode
     debug = '--debug' in sys.argv or '-d' in sys.argv
+    
+    # Display ping frequency
+    print(f"\nPing frequency: {interval} second(s) between ping cycles")
+    print(f"  (Use --interval <seconds> or -i <seconds> to change)\n")
     
     # Create and run diagnostic
     # Note: Time synchronization is now automatic at script level (no root required)
