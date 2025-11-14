@@ -822,14 +822,32 @@ def main():
     
     targets = []
     
-    # Check command line arguments (filter out flags)
-    args = [arg for arg in sys.argv[1:] if not arg.startswith('--') and not arg.startswith('-')]
+    # Parse command line arguments properly
+    # First, identify flags and their values
+    flag_args = set()
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg in ['--interval', '-i', '--debug', '-d']:
+            flag_args.add(i)  # Flag position
+            if arg in ['--interval', '-i'] and i + 1 < len(sys.argv):
+                flag_args.add(i + 1)  # Flag value position
+        elif arg.startswith('--') or arg.startswith('-'):
+            flag_args.add(i)  # Other flags
+    
+    # Get non-flag arguments (these are targets, log prefix, or legacy interval)
+    args = [sys.argv[i] for i in range(1, len(sys.argv)) if i not in flag_args]
     
     if len(args) > 0:
-        # User provided targets
-        targets = args[0].split(',')
-        targets = [t.strip() for t in targets]
-    else:
+        # Check if first arg looks like an IP address (contains dots or is comma-separated IPs)
+        first_arg = args[0]
+        if ',' in first_arg or re.match(r'^\d+\.\d+\.\d+', first_arg):
+            # User provided targets
+            targets = first_arg.split(',')
+            targets = [t.strip() for t in targets]
+        else:
+            # First arg doesn't look like IPs, treat as no targets provided
+            args = []
+    
+    if len(args) == 0:
         # Use defaults: Eero gateway and Google DNS
         if default_gateway:
             print(f"Detected default gateway: {default_gateway}")
