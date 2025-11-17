@@ -155,6 +155,8 @@ python -m pip install matplotlib
 
 If matplotlib is not installed, the tool will still work but skip visualization generation.
 
+**📖 Need help interpreting the charts?** See [CHART_INTERPRETATION_GUIDE.md](CHART_INTERPRETATION_GUIDE.md) for a comprehensive guide on reading and understanding all visualization panels.
+
 ## Exporting Logs
 
 Simply attach **both log files and visualization images** to your email to Eero support. The log files are plain text and can be opened in any text editor or email client. The visualization PNG files provide a quick visual summary of network issues.
