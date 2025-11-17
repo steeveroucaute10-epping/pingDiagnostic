@@ -32,6 +32,7 @@ python -m pip install ntplib      # For accurate time sync checking
 - ✅ **Summary statistics** at the end of each session
 - ✅ **Auto-detects default gateway** (Eero router)
 - ✅ **Script-Level Time Synchronization**: Automatically adjusts all timestamps to NTP time (no root privileges required)
+- ✅ **Network Stability Analytics**: Median uptime between outages, disruption frequency, and timeout duration histograms
 - ✅ **Easy to use command-line interface**
 
 ## Requirements
@@ -187,6 +188,18 @@ python -m pip install ntplib
 ```
 
 **Note**: If `ntplib` is not installed, the script will use local system time and warn you that timestamps may not be synchronized across computers.
+
+## Network Stability Metrics
+
+The visualization suite and log summary now include advanced stability analytics:
+
+- **Median stable time between disruptions** – how long the network stays healthy between timeout clusters
+- **Disruptions per hour** – frequency of outage clusters normalized per hour of monitoring
+- **Median timeout duration** – typical length of an outage (clusters consider consecutive timeouts as one disruption)
+- **Timeout duration histogram** – visual breakdown of short spikes vs lengthy outages
+- **Total timeout time** – aggregate downtime observed during the session
+
+Timeout clusters are derived from consecutive timeout events, so bursts of failures appear as one disruption with a specific duration. This helps characterize the severity and frequency of outages when sharing data with support teams.
 
 ## Tips for Eero Support
 

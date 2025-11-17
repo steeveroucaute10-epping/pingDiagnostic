@@ -13,6 +13,7 @@ import os
 import socket
 import time
 import platform
+import statistics
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 try:
@@ -173,6 +174,7 @@ class PingTarget:
                 'timed out' in line_lower or 
                 'request timeout' in line_lower or
                 'no answer yet' in line_lower or
+                'timeouts' in line_lower or
                 '100% packet loss' in line_lower):
                 return {
                     'status': 'timeout',
@@ -426,6 +428,20 @@ class PingTarget:
             self.success_count += 1
         elif result['status'] == 'timeout':
             self.timeout_count += 1
+
+    def format_duration(self, seconds):
+        """Helper to format seconds into readable string"""
+        if seconds is None:
+            return "N/A"
+        if seconds < 1:
+            return f"{seconds*1000:.0f}ms"
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        minutes = seconds / 60
+        if minutes < 60:
+            return f"{minutes:.1f}m"
+        hours = minutes / 60
+        return f"{hours:.2f}h"
     
     def write_header(self, time_sync_info=None):
         """Write header information to log file"""
@@ -475,6 +491,11 @@ Start Time (NTP-adjusted): {start_time}
         
         # Use synchronized time for end time
         end_time = self.get_synchronized_time().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        analysis = self.analyze_timeouts()
+        median_stable = analysis.get('median_stable_seconds')
+        median_timeout = analysis.get('median_timeout_duration')
+        disruptions_per_hour = analysis.get('groups_per_hour', 0.0)
+        total_timeout_time = analysis.get('total_timeout_time')
         
         footer = f"""
 {'='*80}
@@ -487,10 +508,126 @@ Total Pings: {self.ping_count}
 Successful: {self.success_count} ({success_pct:.2f}%)
 Timeouts: {self.timeout_count} ({timeout_pct:.2f}%)
 Average Duration: {avg_duration:.2f}ms
+Median Timeout Duration: {self.format_duration(median_timeout)}
+Median Stable Time Between Timeouts: {self.format_duration(median_stable)}
+Network Disruptions per Hour: {disruptions_per_hour:.2f}
+Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
 {'='*80}
 """
         with open(self.log_path, 'a', encoding='utf-8') as f:
             f.write(footer)
+    
+    def analyze_timeouts(self):
+        """Analyze timeout clusters and stability metrics"""
+        if hasattr(self, '_timeout_analysis'):
+            return self._timeout_analysis
+        
+        analysis = {
+            'groups': [],
+            'stable_periods': [],
+            'median_stable_seconds': None,
+            'median_timeout_duration': None,
+            'groups_per_hour': 0.0,
+            'total_timeout_time': 0.0,
+            'duration_bins': {'labels': [], 'counts': []},
+            'avg_interval': 0.0
+        }
+        
+        if not self.ping_data:
+            self._timeout_analysis = analysis
+            return analysis
+        
+        timestamps = [entry['timestamp'] for entry in self.ping_data]
+        statuses = [entry['status'] for entry in self.ping_data]
+        
+        interval_samples = []
+        for i in range(1, len(timestamps)):
+            delta = (timestamps[i] - timestamps[i-1]).total_seconds()
+            if delta > 0:
+                interval_samples.append(delta)
+        median_interval = statistics.median(interval_samples) if interval_samples else 1.0
+        avg_interval = statistics.mean(interval_samples) if interval_samples else median_interval
+        nominal_interval = median_interval or avg_interval or 1.0
+        analysis['avg_interval'] = nominal_interval
+        
+        # Identify timeout clusters
+        groups = []
+        current_group = None
+        for ts, status in zip(timestamps, statuses):
+            if status == 'timeout':
+                if current_group is None:
+                    current_group = {'start': ts, 'last': ts, 'count': 1}
+                else:
+                    current_group['last'] = ts
+                    current_group['count'] += 1
+            else:
+                if current_group:
+                    groups.append(current_group)
+                    current_group = None
+        if current_group:
+            groups.append(current_group)
+        
+        formatted_groups = []
+        for group in groups:
+            start = group['start']
+            last = group['last']
+            count = group['count']
+            if count == 1:
+                duration_seconds = nominal_interval
+            else:
+                raw_duration = (last - start).total_seconds()
+                duration_seconds = raw_duration + nominal_interval
+            end = last + timedelta(seconds=nominal_interval)
+            formatted_groups.append({
+                'start': start,
+                'end': end,
+                'count': count,
+                'duration_seconds': duration_seconds
+            })
+        
+        analysis['groups'] = formatted_groups
+        timeout_durations = [g['duration_seconds'] for g in formatted_groups]
+        if timeout_durations:
+            analysis['median_timeout_duration'] = statistics.median(timeout_durations)
+            analysis['total_timeout_time'] = sum(timeout_durations)
+        else:
+            analysis['median_timeout_duration'] = None
+            analysis['total_timeout_time'] = 0.0
+        
+        # Stable periods (uptime) between groups
+        stable_periods = []
+        for i in range(1, len(formatted_groups)):
+            stable = (formatted_groups[i]['start'] - formatted_groups[i-1]['end']).total_seconds()
+            if stable > 0:
+                stable_periods.append(stable)
+        analysis['stable_periods'] = stable_periods
+        if stable_periods:
+            analysis['median_stable_seconds'] = statistics.median(stable_periods)
+        else:
+            analysis['median_stable_seconds'] = None
+        
+        total_seconds = (timestamps[-1] - timestamps[0]).total_seconds()
+        hours_elapsed = total_seconds / 3600 if total_seconds > 0 else 0
+        if hours_elapsed > 0:
+            analysis['groups_per_hour'] = len(formatted_groups) / hours_elapsed
+        else:
+            analysis['groups_per_hour'] = float(len(formatted_groups))
+        
+        # Histogram bins for timeout durations
+        bin_edges = [0, 1, 2, 5, 10, 30, float('inf')]
+        labels = ["<=1s", "1-2s", "2-5s", "5-10s", "10-30s", ">30s"]
+        counts = [0 for _ in labels]
+        for duration in timeout_durations:
+            for idx in range(len(labels)):
+                lower = bin_edges[idx]
+                upper = bin_edges[idx + 1]
+                if lower < duration <= upper:
+                    counts[idx] += 1
+                    break
+        analysis['duration_bins'] = {'labels': labels, 'counts': counts}
+        
+        self._timeout_analysis = analysis
+        return analysis
     
     def generate_visualizations(self):
         """Generate visualization charts for this target"""
@@ -508,16 +645,20 @@ Average Duration: {avg_duration:.2f}ms
         timestamps = [d['timestamp'] for d in self.ping_data]
         durations = [d['duration'] if d['duration'] is not None else 0 for d in self.ping_data]
         is_timeout = [1 if d['status'] == 'timeout' else 0 for d in self.ping_data]
+        analysis = self.analyze_timeouts()
         
-        # Create figure with subplots
-        fig = plt.figure(figsize=(16, 12))
-        fig.suptitle(f'Ping Diagnostic Visualization - {self.target_ip}\nComputer: {self.computer_name}', 
-                     fontsize=16, fontweight='bold')
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle(
+            f'Ping Diagnostic Visualization - {self.target_ip}\nComputer: {self.computer_name}',
+            fontsize=16,
+            fontweight='bold'
+        )
         
-        # 1. Timeout Volume Over Time
-        ax1 = plt.subplot(2, 2, 1)
-        ax1.plot(timestamps, is_timeout, 'r-', linewidth=1, alpha=0.7, label='Timeout Events')
-        ax1.fill_between(timestamps, 0, is_timeout, alpha=0.3, color='red')
+        # 1. Timeout timeline with highlighted clusters
+        ax1 = axes[0, 0]
+        ax1.step(timestamps, is_timeout, where='post', color='red', linewidth=1.5, label='Timeout')
+        for group in analysis['groups']:
+            ax1.axvspan(group['start'], group['end'], color='red', alpha=0.2)
         ax1.set_xlabel('Time')
         ax1.set_ylabel('Timeout (1=Yes, 0=No)')
         ax1.set_title('Timeout Events Over Time')
@@ -526,20 +667,16 @@ Average Duration: {avg_duration:.2f}ms
         plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
         ax1.legend()
         
-        # 2. Average Duration Over Time (rolling average)
-        ax2 = plt.subplot(2, 2, 2)
-        window_size = min(10, len(durations) // 10 + 1)  # Adaptive window size
+        # 2. Ping duration trend with rolling average
+        ax2 = axes[0, 1]
+        window_size = min(10, len(durations) // 10 + 1)
         rolling_avg = []
         for i in range(len(durations)):
             start_idx = max(0, i - window_size + 1)
             window_durs = [d for d in durations[start_idx:i+1] if d > 0]
-            if window_durs:
-                rolling_avg.append(sum(window_durs) / len(window_durs))
-            else:
-                rolling_avg.append(0)
-        
-        ax2.plot(timestamps, durations, 'b.', markersize=2, alpha=0.3, label='Individual Pings')
-        ax2.plot(timestamps, rolling_avg, 'g-', linewidth=2, label=f'Rolling Average ({window_size} pings)')
+            rolling_avg.append(sum(window_durs) / len(window_durs) if window_durs else 0)
+        ax2.plot(timestamps, durations, 'b.', markersize=2, alpha=0.25, label='Ping Duration')
+        ax2.plot(timestamps, rolling_avg, 'g-', linewidth=2, label=f'Rolling Avg ({window_size} pings)')
         ax2.set_xlabel('Time')
         ax2.set_ylabel('Duration (ms)')
         ax2.set_title('Ping Duration Over Time')
@@ -548,58 +685,49 @@ Average Duration: {avg_duration:.2f}ms
         plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha='right')
         ax2.legend()
         
-        # 3. Time Between Timeout Events
-        ax3 = plt.subplot(2, 2, 3)
-        timeout_times = [timestamps[i] for i, is_to in enumerate(is_timeout) if is_to == 1]
-        if len(timeout_times) > 1:
-            time_between = []
-            for i in range(1, len(timeout_times)):
-                delta = (timeout_times[i] - timeout_times[i-1]).total_seconds()
-                time_between.append(delta)
-            
-            if time_between:
-                ax3.hist(time_between, bins=min(20, len(time_between)), edgecolor='black', alpha=0.7, color='orange')
-                ax3.axvline(sum(time_between) / len(time_between), color='red', linestyle='--', 
-                           linewidth=2, label=f'Average: {sum(time_between) / len(time_between):.1f}s')
-                ax3.set_xlabel('Time Between Timeouts (seconds)')
-                ax3.set_ylabel('Frequency')
-                ax3.set_title('Distribution of Time Between Timeout Events')
-                ax3.grid(True, alpha=0.3, axis='y')
-                ax3.legend()
-            else:
-                ax3.text(0.5, 0.5, 'Only one timeout event\n(no intervals to calculate)', 
-                        ha='center', va='center', transform=ax3.transAxes, fontsize=12)
-                ax3.set_title('Time Between Timeout Events')
+        # 3. Stability between disruptions
+        ax3 = axes[1, 0]
+        if analysis['stable_periods']:
+            stable_minutes = [s / 60 for s in analysis['stable_periods']]
+            ax3.bar(range(1, len(stable_minutes) + 1), stable_minutes, color='#3498db', alpha=0.8)
+            ax3.axhline((analysis['median_stable_seconds'] or 0) / 60, color='red', linestyle='--',
+                        label=f"Median: {self.format_duration(analysis['median_stable_seconds'])}")
+            ax3.set_xlabel('Disruption Index')
+            ax3.set_ylabel('Stable Time (minutes)')
+            ax3.set_title('Stable Time Between Timeout Clusters')
+            ax3.grid(True, axis='y', alpha=0.3)
+            ax3.legend()
         else:
-            ax3.text(0.5, 0.5, f'No timeout events\n({self.timeout_count} timeouts total)', 
-                    ha='center', va='center', transform=ax3.transAxes, fontsize=12)
-            ax3.set_title('Time Between Timeout Events')
+            ax3.text(0.5, 0.5, 'No timeout clusters detected', ha='center', va='center',
+                     transform=ax3.transAxes, fontsize=12)
+            ax3.set_title('Stable Time Between Timeout Clusters')
         
-        # 4. Percentage of Timeouts (Pie Chart)
-        ax4 = plt.subplot(2, 2, 4)
-        success_count = self.success_count
-        timeout_count = self.timeout_count
-        other_count = self.ping_count - success_count - timeout_count
-        
-        if self.ping_count > 0:
-            sizes = [success_count, timeout_count, other_count]
-            labels = [f'Successful\n{success_count} ({success_count/self.ping_count*100:.1f}%)',
-                     f'Timeout\n{timeout_count} ({timeout_count/self.ping_count*100:.1f}%)',
-                     f'Other\n{other_count} ({other_count/self.ping_count*100:.1f}%)']
-            colors = ['#2ecc71', '#e74c3c', '#95a5a6']
-            explode = (0, 0.1 if timeout_count > 0 else 0, 0)  # Explode timeout slice if present
-            
-            ax4.pie(sizes, explode=explode, labels=labels, colors=colors, autopct='',
-                   shadow=True, startangle=90)
-            ax4.set_title('Ping Status Distribution')
+        # 4. Timeout duration distribution
+        ax4 = axes[1, 1]
+        bins = analysis['duration_bins']
+        if bins['labels']:
+            ax4.bar(bins['labels'], bins['counts'], color='#e74c3c', alpha=0.8)
+            ax4.set_xlabel('Timeout Duration (seconds)')
+            ax4.set_ylabel('Occurrences')
+            ax4.set_title('Timeout Duration Distribution')
+            ax4.grid(True, axis='y', alpha=0.3)
         else:
-            ax4.text(0.5, 0.5, 'No data available', ha='center', va='center', 
-                    transform=ax4.transAxes, fontsize=12)
-            ax4.set_title('Ping Status Distribution')
+            ax4.text(0.5, 0.5, 'No timeout duration data', ha='center', va='center',
+                     transform=ax4.transAxes, fontsize=12)
+            ax4.set_title('Timeout Duration Distribution')
         
-        plt.tight_layout()
+        # Summary annotation
+        summary_text = (
+            f"Median stable time: {self.format_duration(analysis.get('median_stable_seconds'))}\n"
+            f"Median timeout duration: {self.format_duration(analysis.get('median_timeout_duration'))}\n"
+            f"Disruptions per hour: {analysis.get('groups_per_hour', 0.0):.2f}\n"
+            f"Total timeout time: {self.format_duration(analysis.get('total_timeout_time'))}"
+        )
+        fig.text(0.5, 0.02, summary_text, ha='center', fontsize=11,
+                 bbox=dict(facecolor='#f7f7f7', edgecolor='#cccccc', boxstyle='round,pad=0.5'))
         
-        # Save the figure
+        plt.tight_layout(rect=[0, 0.05, 1, 0.97])
+        
         viz_file = f"{viz_prefix}_visualization.png"
         fig.savefig(viz_file, dpi=150, bbox_inches='tight')
         plt.close(fig)
