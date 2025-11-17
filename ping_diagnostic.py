@@ -16,6 +16,7 @@ import platform
 import statistics
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import statistics
 try:
     import ntplib
     HAS_NTPLIB = True
@@ -516,6 +517,14 @@ Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
 """
         with open(self.log_path, 'a', encoding='utf-8') as f:
             f.write(footer)
+
+        insights = self.generate_insights_text(analysis)
+        if insights:
+            insights_header = "\nInsights & Guidance\n" + "=" * 80 + "\n"
+            with open(self.log_path, 'a', encoding='utf-8') as f:
+                f.write(insights_header)
+                for line in insights:
+                    f.write(f"- {line}\n")
     
     def analyze_timeouts(self):
         """Analyze timeout clusters and stability metrics"""
@@ -612,6 +621,7 @@ Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
             analysis['groups_per_hour'] = len(formatted_groups) / hours_elapsed
         else:
             analysis['groups_per_hour'] = float(len(formatted_groups))
+        analysis['monitor_seconds'] = total_seconds
         
         # Histogram bins for timeout durations
         bin_edges = [0, 1, 2, 5, 10, 30, float('inf')]
@@ -628,6 +638,72 @@ Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
         
         self._timeout_analysis = analysis
         return analysis
+
+    def generate_insights_text(self, analysis):
+        """Generate human-readable insights"""
+        insights = []
+        if not analysis:
+            return insights
+
+        disruptions_per_hour = analysis.get('groups_per_hour', 0.0)
+        median_stable = analysis.get('median_stable_seconds')
+        median_timeout = analysis.get('median_timeout_duration')
+        total_timeout_time = analysis.get('total_timeout_time', 0.0)
+        monitor_seconds = analysis.get('monitor_seconds', 0.0)
+
+        if disruptions_per_hour >= 4:
+            insights.append(
+                "Frequent disruptions (>=4 per hour) detected. The network is highly unstable."
+            )
+        elif disruptions_per_hour >= 2:
+            insights.append(
+                "Multiple disruptions per hour indicate intermittent instability."
+            )
+        elif disruptions_per_hour > 0:
+            insights.append(
+                "Low disruption frequency observed. Intermittent issues occur but are infrequent."
+            )
+        else:
+            insights.append("No disruption clusters detected during this session.")
+
+        if median_stable is not None:
+            if median_stable < 120:
+                insights.append(
+                    "Stable periods between disruptions are very short (<2 minutes)."
+                )
+            elif median_stable < 600:
+                insights.append(
+                    "Stable periods average under 10 minutes between disruptions."
+                )
+            else:
+                insights.append(
+                    f"Stable periods typically last {self.format_duration(median_stable)}, indicating longer healthy windows."
+                )
+
+        if median_timeout is not None:
+            if median_timeout >= 10:
+                insights.append(
+                    "Median outage duration exceeds 10 seconds, suggesting prolonged dropouts."
+                )
+            elif median_timeout >= 3:
+                insights.append(
+                    "Median outage duration is several seconds, noticeable during real-time use."
+                )
+            else:
+                insights.append(
+                    "Outages are brief, typically clearing within a couple seconds."
+                )
+
+        if monitor_seconds > 0:
+            downtime_ratio = total_timeout_time / monitor_seconds
+            insights.append(
+                f"Total downtime: {self.format_duration(total_timeout_time)} "
+                f"({downtime_ratio*100:.2f}% of monitoring window)."
+            )
+
+        if not insights:
+            insights.append("No significant instability detected.")
+        return insights
     
     def generate_visualizations(self):
         """Generate visualization charts for this target"""

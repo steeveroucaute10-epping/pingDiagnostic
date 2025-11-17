@@ -201,6 +201,18 @@ The visualization suite and log summary now include advanced stability analytics
 
 Timeout clusters are derived from consecutive timeout events, so bursts of failures appear as one disruption with a specific duration. This helps characterize the severity and frequency of outages when sharing data with support teams.
 
+## Interpreting the Visualizations & Insights
+
+Each visualization panel highlights a specific aspect of stability:
+
+1. **Timeout Timeline** – Red bands mark each disruption. Closer bands indicate frequent outages.
+2. **Ping Duration Trend** – Shows whether latency drifts upward before failures. Sudden spikes often precede dropouts.
+3. **Stable Time Between Disruptions** – Bar chart of uptime between clusters. Short bars mean the network rarely recovers.
+4. **Timeout Duration Distribution** – Histogram of outage lengths, useful to show if issues are quick blips or lengthy drops.
+
+Under the chart, a text summary highlights median uptime/downtime and disruptions per hour.  
+The log file also contains an **“Insights & Guidance”** section with human-readable conclusions (e.g., “Frequent disruptions detected” or “Outages are brief”). Share this section with support to describe how often and how long the network fails.
+
 ## Tips for Eero Support
 
 1. **Run on multiple devices**: The computer name in logs helps identify which device had connectivity issues
