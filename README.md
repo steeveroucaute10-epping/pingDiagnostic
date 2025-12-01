@@ -13,6 +13,7 @@ Or install individually:
 ```bash
 python -m pip install matplotlib  # For visualizations
 python -m pip install ntplib      # For accurate time sync checking
+python -m pip install speedtest-cli  # For periodic speed tests
 ```
 
 ## Features
@@ -77,6 +78,41 @@ python ping_diagnostic.py -i 2            # Ping every 2 seconds
 # With debug mode
 python ping_diagnostic.py --debug
 ```
+
+### Speed Test Diagnostic (Separate Script)
+
+You can run a periodic internet speed test (download & upload) using a separate script
+so it does not interfere with the ping diagnostic:
+
+```bash
+python speedtest_diagnostic.py
+```
+
+This will:
+
+1. Perform script-level NTP time synchronization (same approach as the ping tool).
+2. Run a speed test approximately every 5 minutes by default.
+3. Log each test to `speedtest_log_YYYYMMDD_HHMMSS.txt`.
+4. Include computer name, download/upload Mbps, ping latency, and status for each run.
+
+To change the interval between tests:
+
+```bash
+# Every 10 minutes
+python speedtest_diagnostic.py --interval 10
+
+# Every 2 minutes
+python speedtest_diagnostic.py -i 2
+
+# Custom log prefix and interval (minutes)
+python speedtest_diagnostic.py my_speed_session 3
+```
+
+When you stop the script with `Ctrl+C`, it will:
+
+- Append summary statistics (average/median/min/max download and upload).
+- Note how often speeds fall below a low-speed threshold.
+- Generate a line chart PNG showing download and upload over time, aligned to NTP timestamps.
 
 ### Examples
 
@@ -159,7 +195,7 @@ If matplotlib is not installed, the tool will still work but skip visualization 
 
 ## Exporting Logs
 
-Simply attach **both log files and visualization images** to your email to Eero support. The log files are plain text and can be opened in any text editor or email client. The visualization PNG files provide a quick visual summary of network issues.
+Simply attach **both ping and speed test log files and visualization images** to your email to Eero support. The log files are plain text and can be opened in any text editor or email client. The visualization PNG files provide a quick visual summary of connectivity stability and throughput over time.
 
 **Pro Tip**: When running on multiple computers, the computer name in each log helps identify which device had issues.
 
