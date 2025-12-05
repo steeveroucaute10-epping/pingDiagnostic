@@ -40,6 +40,18 @@ except ImportError:
     print("  python -m pip install speedtest-cli")
 
 
+def to_camel_case(name):
+    """Convert a run name to camelCase for use in filenames"""
+    if not name:
+        return ""
+    import re
+    # Split by spaces, underscores, hyphens, or other separators
+    words = re.split(r'[\s_\-]+', name.strip())
+    # First word lowercase, subsequent words capitalized
+    camel_words = [words[0].lower()] + [w.capitalize() for w in words[1:] if w]
+    return ''.join(camel_words)
+
+
 def query_ntp_time(ntp_server: str = "pool.ntp.org"):
     """
     Query NTP server to get accurate time and calculate offset (script-level sync).
@@ -87,11 +99,12 @@ def query_ntp_time(ntp_server: str = "pool.ntp.org"):
 class SpeedTestSession:
     """Holds all measurements and logging for a single speedtest run series."""
 
-    def __init__(self, log_file: str, computer_name: str, time_offset=None):
+    def __init__(self, log_file: str, computer_name: str, time_offset=None, run_name=None):
         self.log_file = log_file
         self.log_path = Path(log_file)
         self.computer_name = computer_name
         self.time_offset = time_offset  # seconds, may be None
+        self.run_name = run_name  # Run name for chart headers
 
         self.measurements = []  # list of dicts
 
@@ -130,11 +143,12 @@ class SpeedTestSession:
                     "WARNING: Timestamps may not be synchronized across multiple computers!\n"
                 )
 
+        run_name_line = f"Run Name: {self.run_name}\n" if self.run_name else ""
         header = f"""
 {'='*80}
 Speed Test Diagnostic Log
 {'='*80}
-Computer Name: {self.computer_name}
+{run_name_line}Computer Name: {self.computer_name}
 Start Time (NTP-adjusted): {start_time}
 {time_sync_text}Log File: {self.log_path.absolute()}
 {'='*80}
@@ -285,9 +299,15 @@ Low-speed occurrences (<{low_speed_threshold_mbps:.1f} Mbps):
             if st != "OK":
                 ax.axvline(ts, color="red", alpha=0.3, linestyle="--")
 
+        # Build title with run name if available
+        title_parts = ["Speed Test Results Over Time"]
+        if self.run_name:
+            title_parts.insert(0, f"Run: {self.run_name}")
+        title_parts.append(f"Computer: {self.computer_name}")
+        
         ax.set_xlabel("Time")
         ax.set_ylabel("Speed (Mbps)")
-        ax.set_title("Speed Test Results Over Time")
+        ax.set_title("\n".join(title_parts))
         ax.grid(True, alpha=0.3)
         ax.legend()
 
@@ -304,11 +324,21 @@ Low-speed occurrences (<{low_speed_threshold_mbps:.1f} Mbps):
 
 
 class SpeedTestDiagnostic:
-    def __init__(self, log_prefix=None, interval_minutes=5.0):
+    def __init__(self, log_prefix=None, interval_minutes=5.0, run_name=None):
         self.running = True
         self.interval_minutes = interval_minutes
+        self.run_name = run_name
         self.computer_name = self.get_computer_name()
-        self.log_prefix = log_prefix or f"speedtest_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Build log prefix: use provided prefix, or generate from run_name + timestamp, or just timestamp
+        if log_prefix:
+            self.log_prefix = log_prefix
+        elif run_name:
+            camel_run = to_camel_case(run_name)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self.log_prefix = f"{camel_run}_speedtest_{timestamp}"
+        else:
+            self.log_prefix = f"speedtest_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         self.time_sync_info = self.query_ntp_offset()
         time_offset = (
@@ -318,7 +348,7 @@ class SpeedTestDiagnostic:
         )
 
         log_file = f"{self.log_prefix}.txt"
-        self.session = SpeedTestSession(log_file, self.computer_name, time_offset=time_offset)
+        self.session = SpeedTestSession(log_file, self.computer_name, time_offset=time_offset, run_name=run_name)
 
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -517,17 +547,26 @@ def main():
     print("Speed Test Diagnostic Tool")
     print("=" * 80)
     print()
+    
+    # Prompt for run name
+    run_name = input("Enter a name for this test run (e.g., 'wifi new position', 'node swap', 'after router restart'): ").strip()
+    if not run_name:
+        run_name = None
+        print("No run name provided. Using default naming.\n")
+    else:
+        print(f"Run name: '{run_name}' (will be used as prefix for log files and charts)\n")
 
     log_prefix, interval_minutes = parse_args(sys.argv)
 
     print(f"Test interval: {interval_minutes} minute(s) between speed tests")
     print("  (Use --interval <minutes> or -i <minutes> to change)\n")
 
-    diagnostic = SpeedTestDiagnostic(log_prefix=log_prefix, interval_minutes=interval_minutes)
+    diagnostic = SpeedTestDiagnostic(log_prefix=log_prefix, interval_minutes=interval_minutes, run_name=run_name)
     diagnostic.run()
 
 
 if __name__ == "__main__":
     main()
+
 
 

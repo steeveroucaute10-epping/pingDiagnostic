@@ -33,6 +33,16 @@ except ImportError:
     print("Warning: matplotlib not installed. Visualization features will be disabled.")
     print("Install with: pip install matplotlib")
 
+def to_camel_case(name):
+    """Convert a run name to camelCase for use in filenames"""
+    if not name:
+        return ""
+    # Split by spaces, underscores, hyphens, or other separators
+    words = re.split(r'[\s_\-]+', name.strip())
+    # First word lowercase, subsequent words capitalized
+    camel_words = [words[0].lower()] + [w.capitalize() for w in words[1:] if w]
+    return ''.join(camel_words)
+
 def get_platform_type():
     """Detect the operating system platform"""
     system = platform.system().lower()
@@ -91,7 +101,7 @@ def query_ntp_time(ntp_server='pool.ntp.org'):
 
 class PingTarget:
     """Represents a single ping target with its own logging"""
-    def __init__(self, target_ip, log_file, computer_name, debug=False, time_offset=None):
+    def __init__(self, target_ip, log_file, computer_name, debug=False, time_offset=None, run_name=None):
         self.target_ip = target_ip
         self.log_file = log_file
         self.log_path = Path(log_file)
@@ -102,6 +112,7 @@ class PingTarget:
         self.debug = debug
         self.platform = get_platform_type()
         self.time_offset = time_offset  # Offset in seconds to apply to timestamps
+        self.run_name = run_name  # Run name for chart headers
         
         # Data storage for visualization
         self.ping_data = []  # List of dicts: {'timestamp': datetime, 'duration': float, 'status': str}
@@ -467,11 +478,12 @@ class PingTarget:
                 time_sync_text = "Time Sync: NTP query failed - using local time\n"
                 time_sync_text += "WARNING: Timestamps may not be synchronized across multiple computers!\n"
         
+        run_name_line = f"Run Name: {self.run_name}\n" if self.run_name else ""
         header = f"""
 {'='*80}
 Ping Diagnostic Log
 {'='*80}
-Computer Name: {self.computer_name}
+{run_name_line}Computer Name: {self.computer_name}
 Target IP: {self.target_ip}
 Start Time (NTP-adjusted): {start_time}
 {time_sync_text}Log File: {self.log_path.absolute()}
@@ -724,8 +736,13 @@ Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
         analysis = self.analyze_timeouts()
         
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        # Build title with run name if available
+        title_parts = [f'Ping Diagnostic Visualization - {self.target_ip}']
+        if self.run_name:
+            title_parts.insert(0, f'Run: {self.run_name}')
+        title_parts.append(f'Computer: {self.computer_name}')
         fig.suptitle(
-            f'Ping Diagnostic Visualization - {self.target_ip}\nComputer: {self.computer_name}',
+            '\n'.join(title_parts),
             fontsize=16,
             fontweight='bold'
         )
@@ -812,12 +829,22 @@ Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
 
 
 class PingDiagnostic:
-    def __init__(self, targets, log_prefix=None, computer_name=None, debug=False):
+    def __init__(self, targets, log_prefix=None, computer_name=None, debug=False, run_name=None):
         self.running = True
         self.computer_name = computer_name or self.get_computer_name()
-        self.log_prefix = log_prefix or f"ping_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.run_name = run_name
         self.debug = debug
         self.platform = get_platform_type()
+        
+        # Build log prefix: use provided prefix, or generate from run_name + timestamp, or just timestamp
+        if log_prefix:
+            self.log_prefix = log_prefix
+        elif run_name:
+            camel_run = to_camel_case(run_name)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self.log_prefix = f"{camel_run}_ping_{timestamp}"
+        else:
+            self.log_prefix = f"ping_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         # Query NTP server to get time offset (script-level synchronization)
         self.time_sync_info = self.query_ntp_offset()
@@ -825,13 +852,13 @@ class PingDiagnostic:
         # Extract offset for passing to targets
         time_offset = self.time_sync_info.get('offset_seconds') if self.time_sync_info.get('success') else None
         
-        # Create ping targets with time offset
+        # Create ping targets with time offset and run name
         self.targets = []
         for target_ip in targets:
             # Create log file name based on target IP (sanitize IP for filename)
             safe_ip = target_ip.replace('.', '_')
             log_file = f"{self.log_prefix}_{safe_ip}.txt"
-            target = PingTarget(target_ip, log_file, self.computer_name, debug=debug, time_offset=time_offset)
+            target = PingTarget(target_ip, log_file, self.computer_name, debug=debug, time_offset=time_offset, run_name=run_name)
             self.targets.append(target)
         
         # Setup signal handler for graceful shutdown
@@ -908,6 +935,135 @@ class PingDiagnostic:
         print("\n\nStopping ping diagnostic...")
         self.running = False
     
+    def generate_combined_visualization(self):
+        """Generate a combined visualization chart for all targets in a single file"""
+        if not HAS_MATPLOTLIB:
+            return None
+        
+        # Filter targets with enough data
+        valid_targets = [t for t in self.targets if len(t.ping_data) >= 2]
+        if not valid_targets:
+            print("Not enough data to generate visualizations")
+            return None
+        
+        num_targets = len(valid_targets)
+        # Create figure with num_targets rows × 4 columns
+        fig, axes = plt.subplots(num_targets, 4, figsize=(20, 5 * num_targets))
+        
+        # Handle single target case (axes will be 1D instead of 2D)
+        if num_targets == 1:
+            axes = axes.reshape(1, -1)
+        
+        # Build main title
+        title_parts = ['Ping Diagnostic Visualization - All Targets']
+        if self.run_name:
+            title_parts.insert(0, f'Run: {self.run_name}')
+        title_parts.append(f'Computer: {self.computer_name}')
+        fig.suptitle(
+            '\n'.join(title_parts),
+            fontsize=18,
+            fontweight='bold'
+        )
+        
+        # Generate charts for each target
+        for target_idx, target in enumerate(valid_targets):
+            # Prepare data for this target
+            timestamps = [d['timestamp'] for d in target.ping_data]
+            durations = [d['duration'] if d['duration'] is not None else 0 for d in target.ping_data]
+            is_timeout = [1 if d['status'] == 'timeout' else 0 for d in target.ping_data]
+            analysis = target.analyze_timeouts()
+            
+            # Get axes for this target's row
+            ax1 = axes[target_idx, 0]
+            ax2 = axes[target_idx, 1]
+            ax3 = axes[target_idx, 2]
+            ax4 = axes[target_idx, 3]
+            
+            # 1. Timeout timeline with highlighted clusters
+            ax1.step(timestamps, is_timeout, where='post', color='red', linewidth=1.5, label='Timeout')
+            for group in analysis['groups']:
+                ax1.axvspan(group['start'], group['end'], color='red', alpha=0.2)
+            ax1.set_xlabel('Time')
+            ax1.set_ylabel('Timeout (1=Yes, 0=No)')
+            ax1.set_title(f'{target.target_ip} - Timeout Events Over Time')
+            ax1.grid(True, alpha=0.3)
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
+            ax1.legend()
+            
+            # 2. Ping duration trend with rolling average
+            window_size = min(10, len(durations) // 10 + 1)
+            rolling_avg = []
+            for i in range(len(durations)):
+                start_idx = max(0, i - window_size + 1)
+                window_durs = [d for d in durations[start_idx:i+1] if d > 0]
+                rolling_avg.append(sum(window_durs) / len(window_durs) if window_durs else 0)
+            ax2.plot(timestamps, durations, 'b.', markersize=2, alpha=0.25, label='Ping Duration')
+            ax2.plot(timestamps, rolling_avg, 'g-', linewidth=2, label=f'Rolling Avg ({window_size} pings)')
+            ax2.set_xlabel('Time')
+            ax2.set_ylabel('Duration (ms)')
+            ax2.set_title(f'{target.target_ip} - Ping Duration Over Time')
+            ax2.grid(True, alpha=0.3)
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha='right')
+            ax2.legend()
+            
+            # 3. Stability between disruptions
+            if analysis['stable_periods']:
+                stable_minutes = [s / 60 for s in analysis['stable_periods']]
+                ax3.bar(range(1, len(stable_minutes) + 1), stable_minutes, color='#3498db', alpha=0.8)
+                ax3.axhline((analysis['median_stable_seconds'] or 0) / 60, color='red', linestyle='--',
+                            label=f"Median: {target.format_duration(analysis['median_stable_seconds'])}")
+                ax3.set_xlabel('Disruption Index')
+                ax3.set_ylabel('Stable Time (minutes)')
+                ax3.set_title(f'{target.target_ip} - Stable Time Between Timeout Clusters')
+                ax3.grid(True, axis='y', alpha=0.3)
+                ax3.legend()
+            else:
+                ax3.text(0.5, 0.5, 'No timeout clusters detected', ha='center', va='center',
+                         transform=ax3.transAxes, fontsize=12)
+                ax3.set_title(f'{target.target_ip} - Stable Time Between Timeout Clusters')
+            
+            # 4. Timeout duration distribution
+            bins = analysis['duration_bins']
+            if bins['labels']:
+                ax4.bar(bins['labels'], bins['counts'], color='#e74c3c', alpha=0.8)
+                ax4.set_xlabel('Timeout Duration (seconds)')
+                ax4.set_ylabel('Occurrences')
+                ax4.set_title(f'{target.target_ip} - Timeout Duration Distribution')
+                ax4.grid(True, axis='y', alpha=0.3)
+            else:
+                ax4.text(0.5, 0.5, 'No timeout duration data', ha='center', va='center',
+                         transform=ax4.transAxes, fontsize=12)
+                ax4.set_title(f'{target.target_ip} - Timeout Duration Distribution')
+            
+            # Add summary text below each target's row
+            summary_text = (
+                f"{target.target_ip}: "
+                f"Median stable: {target.format_duration(analysis.get('median_stable_seconds'))} | "
+                f"Median timeout: {target.format_duration(analysis.get('median_timeout_duration'))} | "
+                f"Disruptions/hr: {analysis.get('groups_per_hour', 0.0):.2f}"
+            )
+            fig.text(0.5, 0.02 + (num_targets - target_idx - 1) * (0.05 / num_targets), 
+                    summary_text, ha='center', fontsize=10,
+                    bbox=dict(facecolor='#f7f7f7', edgecolor='#cccccc', boxstyle='round,pad=0.3'))
+        
+        plt.tight_layout(rect=[0.03, 0.05, 1, 0.97])
+        
+        # Use the log prefix from PingDiagnostic (all targets share the same prefix)
+        # The log files are named like: {log_prefix}_{safe_ip}.txt
+        # So we extract the base prefix by removing the IP suffix from the first target's log path
+        first_log_path = str(valid_targets[0].log_path)
+        # Remove .txt extension, then remove the last underscore and IP part
+        viz_prefix = first_log_path.replace('.txt', '')
+        # Find the last underscore before the IP (IPs have dots replaced with underscores)
+        # We'll use the log_prefix directly from self
+        viz_file = f"{self.log_prefix}_combined_visualization.png"
+        fig.savefig(viz_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        
+        return viz_file
+    
     def run(self, interval=1):
         """Run continuous ping diagnostic for all targets"""
         # Write headers for all targets (with time sync info)
@@ -951,13 +1107,12 @@ class PingDiagnostic:
                 target.write_footer()
                 print(f"Log saved: {target.log_path.absolute()}")
             
-            # Generate visualizations
+            # Generate combined visualization for all targets
             if HAS_MATPLOTLIB:
-                print("\nGenerating visualizations...")
-                for target in self.targets:
-                    viz_file = target.generate_visualizations()
-                    if viz_file:
-                        print(f"Visualization saved: {Path(viz_file).absolute()}")
+                print("\nGenerating combined visualization...")
+                viz_file = self.generate_combined_visualization()
+                if viz_file:
+                    print(f"Combined visualization saved: {Path(viz_file).absolute()}")
             
             print("\nYou can now attach these log files and visualizations to your email to Eero support.")
 
@@ -1041,6 +1196,14 @@ def main():
     print("Ping Diagnostic Tool")
     print("="*80)
     print()
+    
+    # Prompt for run name
+    run_name = input("Enter a name for this test run (e.g., 'wifi new position', 'node swap', 'after router restart'): ").strip()
+    if not run_name:
+        run_name = None
+        print("No run name provided. Using default naming.\n")
+    else:
+        print(f"Run name: '{run_name}' (will be used as prefix for log files and charts)\n")
     
     # Default targets: Eero gateway (to be detected) and Google DNS
     default_gateway = get_default_gateway()
@@ -1129,7 +1292,7 @@ def main():
     
     # Create and run diagnostic
     # Note: Time synchronization is now automatic at script level (no root required)
-    diagnostic = PingDiagnostic(targets, log_prefix, debug=debug)
+    diagnostic = PingDiagnostic(targets, log_prefix, debug=debug, run_name=run_name)
     diagnostic.run(interval)
 
 
