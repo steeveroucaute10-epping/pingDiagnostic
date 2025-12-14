@@ -324,7 +324,7 @@ Low-speed occurrences (<{low_speed_threshold_mbps:.1f} Mbps):
 
 
 class SpeedTestDiagnostic:
-    def __init__(self, log_prefix=None, interval_minutes=5.0, run_name=None):
+    def __init__(self, log_prefix=None, interval_minutes=15.0, run_name=None):
         self.running = True
         self.interval_minutes = interval_minutes
         self.run_name = run_name
@@ -427,7 +427,8 @@ class SpeedTestDiagnostic:
             }
 
         try:
-            st = speedtest.Speedtest()
+            # Use secure=True to enable HTTPS and reduce 403 Forbidden errors
+            st = speedtest.Speedtest(secure=True)
             st.get_best_server()
             download_bps = st.download()
             upload_bps = st.upload()
@@ -448,13 +449,23 @@ class SpeedTestDiagnostic:
             }
         except Exception as e:
             ts = self.session.get_synchronized_time()
+            error_msg = str(e)
+            
+            # Provide helpful message for 403 errors (rate limiting)
+            if "403" in error_msg or "Forbidden" in error_msg:
+                error_msg = (
+                    f"HTTP 403 Forbidden - Speedtest.net rate limit reached. "
+                    f"Current interval: {self.interval_minutes} minutes. "
+                    f"Consider increasing interval with --interval <minutes> or wait longer between tests."
+                )
+            
             return {
                 "timestamp": ts,
                 "download_mbps": 0.0,
                 "upload_mbps": 0.0,
                 "ping_ms": 0.0,
                 "status": "ERROR",
-                "error": str(e),
+                "error": error_msg,
             }
 
     def run(self):
@@ -511,7 +522,7 @@ class SpeedTestDiagnostic:
 
 def parse_args(argv):
     log_prefix = None
-    interval_minutes = 5.0
+    interval_minutes = 15.0  # Increased from 5.0 to reduce rate limiting issues
 
     args = [a for a in argv[1:] if not a.startswith("-")]
 
@@ -522,7 +533,7 @@ def parse_args(argv):
         try:
             interval_minutes = float(args[1])
         except ValueError:
-            print(f"Warning: Invalid interval '{args[1]}', using default 5 minutes")
+            print(f"Warning: Invalid interval '{args[1]}', using default 15 minutes")
 
     if "--interval" in argv:
         try:
@@ -530,14 +541,14 @@ def parse_args(argv):
             if idx + 1 < len(argv):
                 interval_minutes = float(argv[idx + 1])
         except (ValueError, IndexError):
-            print("Warning: Invalid value for --interval, using default 5 minutes")
+            print("Warning: Invalid value for --interval, using default 15 minutes")
     elif "-i" in argv:
         try:
             idx = argv.index("-i")
             if idx + 1 < len(argv):
                 interval_minutes = float(argv[idx + 1])
         except (ValueError, IndexError):
-            print("Warning: Invalid value for -i, using default 5 minutes")
+            print("Warning: Invalid value for -i, using default 15 minutes")
 
     return log_prefix, interval_minutes
 
@@ -559,7 +570,8 @@ def main():
     log_prefix, interval_minutes = parse_args(sys.argv)
 
     print(f"Test interval: {interval_minutes} minute(s) between speed tests")
-    print("  (Use --interval <minutes> or -i <minutes> to change)\n")
+    print("  (Use --interval <minutes> or -i <minutes> to change)")
+    print("  Note: Default interval is 15 minutes to reduce rate limiting issues.\n")
 
     diagnostic = SpeedTestDiagnostic(log_prefix=log_prefix, interval_minutes=interval_minutes, run_name=run_name)
     diagnostic.run()
