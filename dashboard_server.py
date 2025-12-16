@@ -6,6 +6,7 @@ Serves a real-time dashboard showing active test results.
 
 import json
 import os
+import argparse
 from pathlib import Path
 from datetime import datetime
 from flask import Flask, render_template, jsonify
@@ -84,15 +85,33 @@ def get_speedtest_data():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Dashboard Web Server for Ping and Speedtest Diagnostics')
+    parser.add_argument(
+        '--port', '-p',
+        type=int,
+        default=5000,
+        help='Port number to run the dashboard server on (default: 5000)'
+    )
+    parser.add_argument(
+        '--host',
+        type=str,
+        default='0.0.0.0',
+        help='Host address to bind to (default: 0.0.0.0)'
+    )
+    args = parser.parse_args()
+    
+    port = args.port
+    host = args.host
+    
     print("=" * 80)
     print("Dashboard Server Starting")
     print("=" * 80)
-    print("\nDashboard will be available at: http://localhost:5000")
+    print(f"\nDashboard will be available at: http://localhost:{port}")
     print("API endpoints:")
-    print("  - http://localhost:5000/api/data (combined data)")
-    print("  - http://localhost:5000/api/ping (ping data only)")
-    print("  - http://localhost:5000/api/speedtest (speedtest data only)")
+    print(f"  - http://localhost:{port}/api/data (combined data)")
+    print(f"  - http://localhost:{port}/api/ping (ping data only)")
+    print(f"  - http://localhost:{port}/api/speedtest (speedtest data only)")
     print("\nPress Ctrl+C to stop the server\n")
     
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host=host, port=port, debug=False, threaded=True)
 

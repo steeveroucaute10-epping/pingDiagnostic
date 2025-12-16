@@ -19,12 +19,17 @@ python -m pip install -r requirements.txt
 
 2. Start the dashboard server:
 ```bash
+# Default port (5000)
 python dashboard_server.py
+
+# Custom port
+python dashboard_server.py --port 8080
+python dashboard_server.py -p 8080
 ```
 
 3. Open your browser and navigate to:
 ```
-http://localhost:5000
+http://localhost:5000  # or your custom port
 ```
 
 ## Usage
@@ -33,7 +38,11 @@ http://localhost:5000
 
 1. **Start the dashboard server** (in one terminal):
 ```bash
+# Default port 5000
 python dashboard_server.py
+
+# Or specify a custom port
+python dashboard_server.py --port 8080
 ```
 
 2. **Start ping diagnostic** (in another terminal):
@@ -46,7 +55,7 @@ python ping_diagnostic.py
 python speedtest_diagnostic.py
 ```
 
-4. **View the dashboard** in your browser at `http://localhost:5000`
+4. **View the dashboard** in your browser at `http://localhost:5000` (or your custom port)
 
 The dashboard will automatically:
 - Detect the latest JSON data files
@@ -93,7 +102,7 @@ These files are automatically created by the diagnostic scripts during execution
 - Ensure JSON files are being written (check file timestamps)
 
 **Port 5000 already in use**
-- Change the port in `dashboard_server.py` (last line: `app.run(port=5001)`)
-- Update the URL in your browser accordingly
+- Use a different port: `python dashboard_server.py --port 5001`
+- Update the URL in your browser accordingly (e.g., `http://localhost:5001`)
 
 

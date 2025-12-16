@@ -121,7 +121,11 @@ Monitor your active ping and speedtest diagnostics in real-time through a web br
 
 1. **Start the dashboard server** (in one terminal):
 ```bash
+# Default port 5000
 python dashboard_server.py
+
+# Or specify a custom port
+python dashboard_server.py --port 8080
 ```
 
 2. **Start your diagnostics** (in other terminals):
@@ -130,7 +134,7 @@ python ping_diagnostic.py
 python speedtest_diagnostic.py  # Optional
 ```
 
-3. **Open your browser** to `http://localhost:5000`
+3. **Open your browser** to `http://localhost:5000` (or your custom port)
 
 The dashboard will:
 - Auto-refresh every minute with the latest data
