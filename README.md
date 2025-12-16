@@ -21,6 +21,7 @@ python -m pip install speedtest-cli  # For periodic speed tests
 - ✅ **Dual Target Monitoring**: Automatically pings both your Eero gateway and Google DNS (8.8.8.8)
 - ✅ **Separate Log Files**: Creates individual log files for each target for easy analysis
 - ✅ **Computer Name Tracking**: Includes computer name in logs (useful when running on multiple devices)
+- ✅ **Real-time Web Dashboard**: Monitor active tests in your browser with auto-refreshing charts
 - ✅ **Continuous ping monitoring** with precise timestamps (millisecond precision)
 - ✅ **Logs IP address, TTL, timeout status, and response time**
 - ✅ **Saves logs to text files** for easy email attachment
@@ -91,8 +92,8 @@ python speedtest_diagnostic.py
 This will:
 
 1. Perform script-level NTP time synchronization (same approach as the ping tool).
-2. Run a speed test approximately every 5 minutes by default.
-3. Log each test to `speedtest_log_YYYYMMDD_HHMMSS.txt`.
+2. Run a speed test approximately every 15 minutes by default.
+3. Log each test to `logs/speedtest/speedtest_log_YYYYMMDD_HHMMSS.txt`.
 4. Include computer name, download/upload Mbps, ping latency, and status for each run.
 
 To change the interval between tests:
@@ -114,6 +115,32 @@ When you stop the script with `Ctrl+C`, it will:
 - Note how often speeds fall below a low-speed threshold.
 - Generate a line chart PNG showing download and upload over time, aligned to NTP timestamps.
 
+### Real-time Web Dashboard
+
+Monitor your active ping and speedtest diagnostics in real-time through a web browser dashboard:
+
+1. **Start the dashboard server** (in one terminal):
+```bash
+python dashboard_server.py
+```
+
+2. **Start your diagnostics** (in other terminals):
+```bash
+python ping_diagnostic.py
+python speedtest_diagnostic.py  # Optional
+```
+
+3. **Open your browser** to `http://localhost:5000`
+
+The dashboard will:
+- Auto-refresh every minute with the latest data
+- Display interactive charts for ping duration and speedtest results
+- Show real-time statistics (success rates, timeouts, averages)
+- Display computer name for easy identification when running multiple tests
+- Support multiple ping targets with separate charts
+
+**📖 For detailed dashboard documentation**, see [README_DASHBOARD.md](README_DASHBOARD.md)
+
 ### Examples
 
 ```bash
@@ -131,14 +158,16 @@ python ping_diagnostic.py 192.168.1.1,8.8.8.8,1.1.1.1 network_test 2
 
 The script creates **separate log files** for each target:
 
-- `ping_log_YYYYMMDD_HHMMSS_192_168_1_1.txt` (for gateway)
-- `ping_log_YYYYMMDD_HHMMSS_8_8_8_8.txt` (for Google DNS)
+- `logs/ping/ping_log_YYYYMMDD_HHMMSS_192_168_1_1.txt` (for gateway)
+- `logs/ping/ping_log_YYYYMMDD_HHMMSS_8_8_8_8.txt` (for Google DNS)
 
 Each log file contains:
 - Computer name (so you can identify which device generated the log)
 - Target IP address
 - All ping results with timestamps
 - Summary statistics
+
+**📁 For directory structure details**, see [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md)
 
 ## Log Format
 
@@ -182,7 +211,7 @@ The tool automatically generates comprehensive visualization charts when you sto
 3. **Time Between Timeout Events**: Histogram showing the distribution of intervals between timeouts
 4. **Ping Status Distribution**: Pie chart showing percentage of successful vs timeout pings
 
-Visualization files are saved as: `ping_log_YYYYMMDD_HHMMSS_IP_visualization.png`
+Visualization files are saved as: `logs/visualizations/ping_log_YYYYMMDD_HHMMSS_IP_visualization.png`
 
 **Note**: Visualizations require matplotlib. Install with:
 ```bash
