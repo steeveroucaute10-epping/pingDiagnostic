@@ -96,3 +96,4 @@ These files are automatically created by the diagnostic scripts during execution
 - Change the port in `dashboard_server.py` (last line: `app.run(port=5001)`)
 - Update the URL in your browser accordingly
 
+

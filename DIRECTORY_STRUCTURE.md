@@ -57,3 +57,4 @@ The dashboard server looks for JSON files in the `data/` directory:
 3. **Easy to share**: All visualization PNGs are in one place (`logs/visualizations/`)
 4. **Version control friendly**: `data/` directory is ignored by git (see `.gitignore`)
 
+

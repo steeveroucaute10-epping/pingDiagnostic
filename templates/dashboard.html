@@ -65,15 +65,24 @@
             50% { opacity: 0.5; }
         }
         
+        .computer-name {
+            color: #667eea;
+            font-size: 16px;
+            font-weight: bold;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+        
         .last-update {
             color: #666;
             font-size: 14px;
         }
         
         .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            display: flex;
+            flex-direction: column;
             gap: 20px;
+            width: 100%;
         }
         
         .card {
@@ -81,6 +90,46 @@
             border-radius: 10px;
             padding: 20px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: visible;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        #pingSection {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        .ping-charts-container {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            gap: 20px;
+            justify-content: space-between;
+            align-items: stretch;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        .ping-chart-wrapper {
+            flex: 1 1 0 !important;
+            min-width: 0;
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+        
+        @media (max-width: 1000px) {
+            .ping-charts-container {
+                flex-wrap: wrap !important;
+            }
+            .ping-chart-wrapper {
+                flex: 1 1 100% !important;
+            }
         }
         
         .card h2 {
@@ -99,9 +148,15 @@
         
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(4, 1fr);
             gap: 15px;
             margin-top: 20px;
+        }
+        
+        @media (max-width: 800px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
         
         .stat-box {
@@ -142,6 +197,7 @@
         <div class="header">
             <div>
                 <h1>Network Diagnostic Dashboard</h1>
+                <div class="computer-name" id="computerName">Loading computer name...</div>
                 <div class="last-update" id="lastUpdate">Loading...</div>
             </div>
             <div class="status-indicator">
@@ -208,7 +264,7 @@
                 return;
             }
             
-            let html = '';
+            let html = '<div class="ping-charts-container">';
             
             // Create charts for each target
             for (const [targetIp, targetData] of Object.entries(pingData.targets)) {
@@ -216,7 +272,7 @@
                 const statsId = `pingStats_${targetIp.replace(/\./g, '_')}`;
                 
                 html += `
-                    <div style="margin-bottom: 30px;">
+                    <div class="ping-chart-wrapper">
                         <h3 style="color: #667eea; margin-bottom: 15px;">Target: ${targetIp}</h3>
                         <div class="chart-container">
                             <canvas id="${chartId}"></canvas>
@@ -226,6 +282,7 @@
                 `;
             }
             
+            html += '</div>';
             container.innerHTML = html;
             
             // Create charts
@@ -234,12 +291,10 @@
                 const statsId = `pingStats_${targetIp.replace(/\./g, '_')}`;
                 
                 const data = targetData.ping_data || [];
-                // Convert timestamps to indices for x-axis (time-based display)
+                // Convert timestamps to Date objects (these are already NTP-adjusted from the server)
                 const timestamps = data.map(d => new Date(d.timestamp));
                 const durations = data.map(d => d.duration || null);
                 const statuses = data.map(d => d.status);
-                // Use indices for x-axis, timestamps for labels
-                const xAxisData = data.map((_, i) => i);
                 
                 // Calculate statistics
                 const successful = durations.filter(d => d !== null);
@@ -276,19 +331,47 @@
                     pingCharts[targetIp].destroy();
                 }
                 
+                // Create data points with timestamps for successful pings
+                const chartData = timestamps.map((ts, i) => ({
+                    x: ts,
+                    y: durations[i]
+                }));
+                
+                // Find max duration for positioning timeout markers
+                const validDurations = durations.filter(d => d !== null && d > 0);
+                const maxDuration = validDurations.length > 0 ? Math.max(...validDurations) : 100;
+                const timeoutMarkerY = maxDuration * 1.15 || 100; // Position timeouts 15% above max
+                
+                // Create timeout markers (red triangle points at timeout events)
+                const timeoutData = timestamps
+                    .map((ts, i) => statuses[i] === 'timeout' ? { x: ts, y: timeoutMarkerY } : null)
+                    .filter(d => d !== null);
+                
                 pingCharts[targetIp] = new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: xAxisData,
                         datasets: [
                             {
                                 label: 'Ping Duration (ms)',
-                                data: durations,
+                                data: chartData,
                                 borderColor: '#667eea',
                                 backgroundColor: 'rgba(102, 126, 234, 0.1)',
                                 tension: 0.4,
                                 pointRadius: 2,
-                                pointHoverRadius: 4
+                                pointHoverRadius: 4,
+                                spanGaps: false
+                            },
+                            {
+                                label: 'Timeout Events',
+                                data: timeoutData,
+                                borderColor: '#e74c3c',
+                                backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                                pointRadius: 5,
+                                pointHoverRadius: 7,
+                                pointStyle: 'triangle',
+                                showLine: false,
+                                borderWidth: 2,
+                                order: 1
                             }
                         ]
                     },
@@ -299,13 +382,20 @@
                             x: {
                                 type: 'time',
                                 time: {
+                                    unit: 'minute',
                                     displayFormats: {
-                                        minute: 'HH:mm'
+                                        minute: 'HH:mm:ss',
+                                        second: 'HH:mm:ss'
                                     }
                                 },
                                 title: {
                                     display: true,
-                                    text: 'Time'
+                                    text: 'Time (NTP-adjusted)'
+                                },
+                                ticks: {
+                                    source: 'data',
+                                    maxRotation: 45,
+                                    minRotation: 45
                                 }
                             },
                             y: {
@@ -322,14 +412,38 @@
                             },
                             tooltip: {
                                 callbacks: {
-                                    label: function(context) {
-                                        const value = context.parsed.y;
-                                        const index = context.dataIndex;
-                                        const status = statuses[index];
-                                        if (value === null) {
-                                            return `Status: ${status}`;
+                                    title: function(context) {
+                                        // Show timestamp in tooltip title
+                                        const point = context[0];
+                                        const datasetIndex = point.datasetIndex;
+                                        const dataIndex = point.dataIndex;
+                                        
+                                        if (datasetIndex === 1) {
+                                            // Timeout event - find the original timestamp
+                                            const timeoutTimestamp = timeoutData[dataIndex]?.x;
+                                            if (timeoutTimestamp) {
+                                                return new Date(timeoutTimestamp).toLocaleString() + ' - TIMEOUT';
+                                            }
+                                        } else if (timestamps[dataIndex]) {
+                                            return timestamps[dataIndex].toLocaleString();
                                         }
-                                        return `Duration: ${value.toFixed(1)}ms`;
+                                        return '';
+                                    },
+                                    label: function(context) {
+                                        const datasetIndex = context.datasetIndex;
+                                        const dataIndex = context.dataIndex;
+                                        
+                                        if (datasetIndex === 1) {
+                                            // Timeout event
+                                            return 'Timeout Event';
+                                        } else {
+                                            const value = context.parsed.y;
+                                            const status = statuses[dataIndex];
+                                            if (value === null) {
+                                                return `Status: ${status}`;
+                                            }
+                                            return `Duration: ${value.toFixed(1)}ms`;
+                                        }
                                     }
                                 }
                             }
@@ -348,11 +462,10 @@
             }
             
             const measurements = speedtestData.measurements || [];
+            // Convert timestamps to Date objects (these are already NTP-adjusted from the server)
             const timestamps = measurements.map(m => new Date(m.timestamp));
             const downloads = measurements.map(m => m.status === 'OK' ? m.download_mbps : null);
             const uploads = measurements.map(m => m.status === 'OK' ? m.upload_mbps : null);
-            // Use indices for x-axis, timestamps for labels
-            const xAxisData = measurements.map((_, i) => i);
             
             // Calculate statistics
             const successful = measurements.filter(m => m.status === 'OK');
@@ -394,14 +507,23 @@
                 speedtestChart.destroy();
             }
             
+            // Create data points with timestamps
+            const downloadData = timestamps.map((ts, i) => ({
+                x: ts,
+                y: downloads[i]
+            }));
+            const uploadData = timestamps.map((ts, i) => ({
+                x: ts,
+                y: uploads[i]
+            }));
+            
             speedtestChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: xAxisData,
                     datasets: [
                         {
                             label: 'Download (Mbps)',
-                            data: downloads,
+                            data: downloadData,
                             borderColor: '#4caf50',
                             backgroundColor: 'rgba(76, 175, 80, 0.1)',
                             tension: 0.4,
@@ -410,7 +532,7 @@
                         },
                         {
                             label: 'Upload (Mbps)',
-                            data: uploads,
+                            data: uploadData,
                             borderColor: '#ff9800',
                             backgroundColor: 'rgba(255, 152, 0, 0.1)',
                             tension: 0.4,
@@ -422,25 +544,26 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                            scales: {
-                                x: {
-                                    type: 'linear',
-                                    title: {
-                                        display: true,
-                                        text: 'Time'
-                                    },
-                                    ticks: {
-                                        stepSize: Math.max(1, Math.floor(xAxisData.length / 10)),
-                                        callback: function(value, index, ticks) {
-                                            const dataIndex = Math.round(value);
-                                            if (timestamps[dataIndex]) {
-                                                const date = timestamps[dataIndex];
-                                                return date.toLocaleTimeString();
-                                            }
-                                            return '';
-                                        }
-                                    }
-                                },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute',
+                                displayFormats: {
+                                    minute: 'HH:mm:ss',
+                                    second: 'HH:mm:ss'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time (NTP-adjusted)'
+                            },
+                            ticks: {
+                                source: 'data',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
                         y: {
                             title: {
                                 display: true,
@@ -466,6 +589,11 @@
                 document.getElementById('lastUpdate').textContent = 
                     `Last updated: ${formatTime(data.timestamp)}`;
                 
+                // Extract and display computer name (prefer ping, fallback to speedtest)
+                const computerName = data.ping?.computer_name || data.speedtest?.computer_name || 'Unknown';
+                document.getElementById('computerName').textContent = 
+                    `Computer: ${computerName}`;
+                
                 updateStatus(true);
                 
                 if (data.ping) {
@@ -486,6 +614,8 @@
                 updateStatus(false);
                 document.getElementById('lastUpdate').textContent = 
                     'Error loading data. Make sure the dashboard server is running.';
+                document.getElementById('computerName').textContent = 
+                    'Computer: Unknown';
             }
         }
         
