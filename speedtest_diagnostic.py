@@ -10,6 +10,7 @@ import os
 import socket
 import signal
 import statistics
+import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import time as _time
@@ -99,12 +100,13 @@ def query_ntp_time(ntp_server: str = "pool.ntp.org"):
 class SpeedTestSession:
     """Holds all measurements and logging for a single speedtest run series."""
 
-    def __init__(self, log_file: str, computer_name: str, time_offset=None, run_name=None):
+    def __init__(self, log_file: str, computer_name: str, time_offset=None, run_name=None, visualizations_dir=None):
         self.log_file = log_file
         self.log_path = Path(log_file)
         self.computer_name = computer_name
         self.time_offset = time_offset  # seconds, may be None
         self.run_name = run_name  # Run name for chart headers
+        self.visualizations_dir = Path(visualizations_dir) if visualizations_dir else Path('logs/visualizations')
 
         self.measurements = []  # list of dicts
 
@@ -316,11 +318,11 @@ Low-speed occurrences (<{low_speed_threshold_mbps:.1f} Mbps):
 
         plt.tight_layout()
 
-        viz_file = str(self.log_path).replace(".txt", "_speedtest_visualization.png")
+        viz_file = self.visualizations_dir / f"{self.log_path.stem}_speedtest_visualization.png"
         fig.savefig(viz_file, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-        return viz_file
+        return str(viz_file)
 
 
 class SpeedTestDiagnostic:
@@ -329,6 +331,17 @@ class SpeedTestDiagnostic:
         self.interval_minutes = interval_minutes
         self.run_name = run_name
         self.computer_name = self.get_computer_name()
+        
+        # Create directories if they don't exist
+        self.logs_dir = Path('logs/speedtest')
+        self.visualizations_dir = Path('logs/visualizations')
+        self.data_dir = Path('data')
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.visualizations_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Store JSON file path for cleanup
+        self.json_file_path = None
         
         # Build log prefix: use provided prefix, or generate from run_name + timestamp, or just timestamp
         if log_prefix:
@@ -347,8 +360,8 @@ class SpeedTestDiagnostic:
             else None
         )
 
-        log_file = f"{self.log_prefix}.txt"
-        self.session = SpeedTestSession(log_file, self.computer_name, time_offset=time_offset, run_name=run_name)
+        log_file = self.logs_dir / f"{self.log_prefix}.txt"
+        self.session = SpeedTestSession(str(log_file), self.computer_name, time_offset=time_offset, run_name=run_name, visualizations_dir=self.visualizations_dir)
 
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -414,6 +427,45 @@ class SpeedTestDiagnostic:
     def signal_handler(self, signum, frame):
         print("\n\nStopping speed test diagnostic...")
         self.running = False
+    
+    def export_json_data(self):
+        """Export current speedtest data to JSON file for dashboard"""
+        try:
+            # Serialize measurements for JSON
+            measurements_serialized = []
+            for m in self.session.measurements:
+                measurements_serialized.append({
+                    'timestamp': m['timestamp'].isoformat() if isinstance(m['timestamp'], datetime) else m['timestamp'],
+                    'download_mbps': m['download_mbps'],
+                    'upload_mbps': m['upload_mbps'],
+                    'ping_ms': m['ping_ms'],
+                    'status': m['status'],
+                    'error': m.get('error')
+                })
+            
+            json_data = {
+                'run_name': self.run_name,
+                'computer_name': self.computer_name,
+                'start_time': self.session.get_synchronized_time().isoformat() if self.session.measurements else None,
+                'time_sync_info': self.time_sync_info,
+                'interval_minutes': self.interval_minutes,
+                'measurements': measurements_serialized
+            }
+            
+            # Write JSON file to data directory for dashboard
+            json_file = f"{self.log_prefix}.json"
+            json_path = self.data_dir / json_file
+            
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, indent=2, ensure_ascii=False)
+            
+            # Store path for cleanup
+            self.json_file_path = json_path
+            
+            return json_path
+        except Exception as e:
+            print(f"Error exporting JSON data: {e}")
+            return None
 
     def run_speedtest_once(self):
         if not HAS_SPEEDTEST:
@@ -488,6 +540,9 @@ class SpeedTestDiagnostic:
                 # Ensure result timestamp is synchronized object
                 result["timestamp"] = sync_time
                 self.session.log_result(timestamp_str, result)
+                
+                # Export JSON data for dashboard
+                self.export_json_data()
 
                 if not self.running:
                     break
@@ -513,11 +568,23 @@ class SpeedTestDiagnostic:
                 viz_file = self.session.generate_visualization()
                 if viz_file:
                     print(f"Visualization saved: {Path(viz_file).absolute()}")
+            
+            # Clean up JSON file after generating PNG
+            self.cleanup_json_file()
 
             print(
                 "\nYou can now attach this speed test log and visualization alongside your "
                 "ping diagnostics when contacting Eero support."
             )
+    
+    def cleanup_json_file(self):
+        """Remove JSON file used for dashboard after PNG is generated"""
+        if self.json_file_path and self.json_file_path.exists():
+            try:
+                self.json_file_path.unlink()
+                print(f"Cleaned up JSON file: {self.json_file_path.name}")
+            except Exception as e:
+                print(f"Error cleaning up JSON file: {e}")
 
 
 def parse_args(argv):

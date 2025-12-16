@@ -14,6 +14,7 @@ import socket
 import time
 import platform
 import statistics
+import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import statistics
@@ -727,7 +728,11 @@ Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
             return None
         
         safe_ip = self.target_ip.replace('.', '_')
-        viz_prefix = str(self.log_path).replace('.txt', '')
+        # Save visualization to logs/visualizations directory
+        viz_dir = Path('logs/visualizations')
+        viz_dir.mkdir(parents=True, exist_ok=True)
+        viz_prefix = self.log_path.stem
+        viz_file = viz_dir / f"{viz_prefix}_visualization.png"
         
         # Prepare data
         timestamps = [d['timestamp'] for d in self.ping_data]
@@ -821,11 +826,10 @@ Total Recorded Timeout Time: {self.format_duration(total_timeout_time)}
         
         plt.tight_layout(rect=[0, 0.05, 1, 0.97])
         
-        viz_file = f"{viz_prefix}_visualization.png"
         fig.savefig(viz_file, dpi=150, bbox_inches='tight')
         plt.close(fig)
         
-        return viz_file
+        return str(viz_file)
 
 
 class PingDiagnostic:
@@ -852,13 +856,24 @@ class PingDiagnostic:
         # Extract offset for passing to targets
         time_offset = self.time_sync_info.get('offset_seconds') if self.time_sync_info.get('success') else None
         
+        # Create directories if they don't exist
+        self.logs_dir = Path('logs/ping')
+        self.visualizations_dir = Path('logs/visualizations')
+        self.data_dir = Path('data')
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.visualizations_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Store JSON file path for cleanup
+        self.json_file_path = None
+        
         # Create ping targets with time offset and run name
         self.targets = []
         for target_ip in targets:
             # Create log file name based on target IP (sanitize IP for filename)
             safe_ip = target_ip.replace('.', '_')
-            log_file = f"{self.log_prefix}_{safe_ip}.txt"
-            target = PingTarget(target_ip, log_file, self.computer_name, debug=debug, time_offset=time_offset, run_name=run_name)
+            log_file = self.logs_dir / f"{self.log_prefix}_{safe_ip}.txt"
+            target = PingTarget(target_ip, str(log_file), self.computer_name, debug=debug, time_offset=time_offset, run_name=run_name)
             self.targets.append(target)
         
         # Setup signal handler for graceful shutdown
@@ -1058,7 +1073,7 @@ class PingDiagnostic:
         viz_prefix = first_log_path.replace('.txt', '')
         # Find the last underscore before the IP (IPs have dots replaced with underscores)
         # We'll use the log_prefix directly from self
-        viz_file = f"{self.log_prefix}_combined_visualization.png"
+        viz_file = self.visualizations_dir / f"{self.log_prefix}_combined_visualization.png"
         fig.savefig(viz_file, dpi=150, bbox_inches='tight')
         plt.close(fig)
         
@@ -1092,6 +1107,9 @@ class PingDiagnostic:
                         break
                     target.ping(timestamp)
                 
+                # Export JSON data for dashboard (every ping cycle)
+                self.export_json_data()
+                
                 # Wait before next cycle (if still running)
                 if self.running:
                     import time
@@ -1112,9 +1130,68 @@ class PingDiagnostic:
                 print("\nGenerating combined visualization...")
                 viz_file = self.generate_combined_visualization()
                 if viz_file:
-                    print(f"Combined visualization saved: {Path(viz_file).absolute()}")
+                    print(f"Combined visualization saved: {viz_file.absolute()}")
+            
+            # Clean up JSON file after generating PNGs
+            self.cleanup_json_file()
             
             print("\nYou can now attach these log files and visualizations to your email to Eero support.")
+    
+    def cleanup_json_file(self):
+        """Remove JSON file used for dashboard after PNGs are generated"""
+        if self.json_file_path and self.json_file_path.exists():
+            try:
+                self.json_file_path.unlink()
+                if self.debug:
+                    print(f"Cleaned up JSON file: {self.json_file_path}")
+            except Exception as e:
+                if self.debug:
+                    print(f"Error cleaning up JSON file: {e}")
+    
+    def export_json_data(self):
+        """Export current ping data to JSON file for dashboard"""
+        try:
+            json_data = {
+                'run_name': self.run_name,
+                'computer_name': self.computer_name,
+                'start_time': self.targets[0].start_time.isoformat() if self.targets and self.targets[0].start_time else None,
+                'time_sync_info': self.time_sync_info,
+                'targets': {}
+            }
+            
+            for target in self.targets:
+                # Convert datetime objects to ISO format strings for JSON
+                ping_data_serialized = []
+                for entry in target.ping_data:
+                    ping_data_serialized.append({
+                        'timestamp': entry['timestamp'].isoformat() if isinstance(entry['timestamp'], datetime) else entry['timestamp'],
+                        'duration': entry['duration'],
+                        'status': entry['status']
+                    })
+                
+                json_data['targets'][target.target_ip] = {
+                    'target_ip': target.target_ip,
+                    'ping_count': target.ping_count,
+                    'success_count': target.success_count,
+                    'timeout_count': target.timeout_count,
+                    'ping_data': ping_data_serialized
+                }
+            
+            # Write JSON file to data directory for dashboard
+            json_file = f"{self.log_prefix}.json"
+            json_path = self.data_dir / json_file
+            
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, indent=2, ensure_ascii=False)
+            
+            # Store path for cleanup
+            self.json_file_path = json_path
+            
+            return json_path
+        except Exception as e:
+            if self.debug:
+                print(f"Error exporting JSON data: {e}")
+            return None
 
 
 def get_default_gateway():

@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Diagnostic Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.inactive {
+            background: #ccc;
+            animation: none;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .last-update {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 20px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 22px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-bottom: 20px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-box {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            text-transform: uppercase;
+        }
+        
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>Network Diagnostic Dashboard</h1>
+                <div class="last-update" id="lastUpdate">Loading...</div>
+            </div>
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Active</span>
+            </div>
+        </div>
+        
+        <div class="dashboard-grid">
+            <!-- Ping Diagnostics Section -->
+            <div class="card">
+                <h2>Ping Diagnostics</h2>
+                <div id="pingSection">
+                    <div class="loading">Loading ping data...</div>
+                </div>
+            </div>
+            
+            <!-- Speedtest Section -->
+            <div class="card">
+                <h2>Speed Test</h2>
+                <div id="speedtestSection">
+                    <div class="loading">Loading speedtest data...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart instances
+        let pingCharts = {};
+        let speedtestChart = null;
+        
+        // Update interval (1 minute = 60000ms)
+        const UPDATE_INTERVAL = 60000;
+        
+        function formatTime(timestamp) {
+            if (!timestamp) return 'Never';
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString();
+        }
+        
+        function formatDuration(ms) {
+            if (ms === null || ms === undefined) return 'N/A';
+            return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms/1000).toFixed(2)}s`;
+        }
+        
+        function updateStatus(isActive) {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            if (isActive) {
+                dot.classList.remove('inactive');
+                text.textContent = 'Active';
+            } else {
+                dot.classList.add('inactive');
+                text.textContent = 'Inactive';
+            }
+        }
+        
+        function createPingCharts(pingData) {
+            const container = document.getElementById('pingSection');
+            
+            if (!pingData || !pingData.targets || Object.keys(pingData.targets).length === 0) {
+                container.innerHTML = '<div class="no-data">No ping data available. Start a ping diagnostic to see results here.</div>';
+                return;
+            }
+            
+            let html = '';
+            
+            // Create charts for each target
+            for (const [targetIp, targetData] of Object.entries(pingData.targets)) {
+                const chartId = `pingChart_${targetIp.replace(/\./g, '_')}`;
+                const statsId = `pingStats_${targetIp.replace(/\./g, '_')}`;
+                
+                html += `
+                    <div style="margin-bottom: 30px;">
+                        <h3 style="color: #667eea; margin-bottom: 15px;">Target: ${targetIp}</h3>
+                        <div class="chart-container">
+                            <canvas id="${chartId}"></canvas>
+                        </div>
+                        <div id="${statsId}" class="stats-grid"></div>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+            
+            // Create charts
+            for (const [targetIp, targetData] of Object.entries(pingData.targets)) {
+                const chartId = `pingChart_${targetIp.replace(/\./g, '_')}`;
+                const statsId = `pingStats_${targetIp.replace(/\./g, '_')}`;
+                
+                const data = targetData.ping_data || [];
+                // Convert timestamps to indices for x-axis (time-based display)
+                const timestamps = data.map(d => new Date(d.timestamp));
+                const durations = data.map(d => d.duration || null);
+                const statuses = data.map(d => d.status);
+                // Use indices for x-axis, timestamps for labels
+                const xAxisData = data.map((_, i) => i);
+                
+                // Calculate statistics
+                const successful = durations.filter(d => d !== null);
+                const timeouts = statuses.filter(s => s === 'timeout').length;
+                const successRate = data.length > 0 ? ((data.length - timeouts) / data.length * 100).toFixed(1) : 0;
+                const avgDuration = successful.length > 0 
+                    ? (successful.reduce((a, b) => a + b, 0) / successful.length).toFixed(1)
+                    : 'N/A';
+                
+                // Update stats
+                document.getElementById(statsId).innerHTML = `
+                    <div class="stat-box">
+                        <div class="stat-value">${data.length}</div>
+                        <div class="stat-label">Total Pings</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${successRate}%</div>
+                        <div class="stat-label">Success Rate</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${timeouts}</div>
+                        <div class="stat-label">Timeouts</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${avgDuration}ms</div>
+                        <div class="stat-label">Avg Duration</div>
+                    </div>
+                `;
+                
+                // Create chart
+                const ctx = document.getElementById(chartId).getContext('2d');
+                
+                if (pingCharts[targetIp]) {
+                    pingCharts[targetIp].destroy();
+                }
+                
+                pingCharts[targetIp] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: xAxisData,
+                        datasets: [
+                            {
+                                label: 'Ping Duration (ms)',
+                                data: durations,
+                                borderColor: '#667eea',
+                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                tension: 0.4,
+                                pointRadius: 2,
+                                pointHoverRadius: 4
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    displayFormats: {
+                                        minute: 'HH:mm'
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'Duration (ms)'
+                                },
+                                beginAtZero: true
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const value = context.parsed.y;
+                                        const index = context.dataIndex;
+                                        const status = statuses[index];
+                                        if (value === null) {
+                                            return `Status: ${status}`;
+                                        }
+                                        return `Duration: ${value.toFixed(1)}ms`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        function createSpeedtestChart(speedtestData) {
+            const container = document.getElementById('speedtestSection');
+            
+            if (!speedtestData || !speedtestData.measurements || speedtestData.measurements.length === 0) {
+                container.innerHTML = '<div class="no-data">No speedtest data available. Start a speedtest diagnostic to see results here.</div>';
+                return;
+            }
+            
+            const measurements = speedtestData.measurements || [];
+            const timestamps = measurements.map(m => new Date(m.timestamp));
+            const downloads = measurements.map(m => m.status === 'OK' ? m.download_mbps : null);
+            const uploads = measurements.map(m => m.status === 'OK' ? m.upload_mbps : null);
+            // Use indices for x-axis, timestamps for labels
+            const xAxisData = measurements.map((_, i) => i);
+            
+            // Calculate statistics
+            const successful = measurements.filter(m => m.status === 'OK');
+            const avgDownload = successful.length > 0
+                ? (successful.reduce((sum, m) => sum + m.download_mbps, 0) / successful.length).toFixed(2)
+                : 'N/A';
+            const avgUpload = successful.length > 0
+                ? (successful.reduce((sum, m) => sum + m.upload_mbps, 0) / successful.length).toFixed(2)
+                : 'N/A';
+            const lastTest = successful.length > 0 ? successful[successful.length - 1] : null;
+            
+            container.innerHTML = `
+                <div class="chart-container">
+                    <canvas id="speedtestChart"></canvas>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-value">${successful.length}</div>
+                        <div class="stat-label">Tests Completed</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${avgDownload} Mbps</div>
+                        <div class="stat-label">Avg Download</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${avgUpload} Mbps</div>
+                        <div class="stat-label">Avg Upload</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${lastTest ? lastTest.ping_ms.toFixed(1) + 'ms' : 'N/A'}</div>
+                        <div class="stat-label">Last Ping</div>
+                    </div>
+                </div>
+            `;
+            
+            const ctx = document.getElementById('speedtestChart').getContext('2d');
+            
+            if (speedtestChart) {
+                speedtestChart.destroy();
+            }
+            
+            speedtestChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: xAxisData,
+                    datasets: [
+                        {
+                            label: 'Download (Mbps)',
+                            data: downloads,
+                            borderColor: '#4caf50',
+                            backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                            tension: 0.4,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
+                        },
+                        {
+                            label: 'Upload (Mbps)',
+                            data: uploads,
+                            borderColor: '#ff9800',
+                            backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                            tension: 0.4,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    type: 'linear',
+                                    title: {
+                                        display: true,
+                                        text: 'Time'
+                                    },
+                                    ticks: {
+                                        stepSize: Math.max(1, Math.floor(xAxisData.length / 10)),
+                                        callback: function(value, index, ticks) {
+                                            const dataIndex = Math.round(value);
+                                            if (timestamps[dataIndex]) {
+                                                const date = timestamps[dataIndex];
+                                                return date.toLocaleTimeString();
+                                            }
+                                            return '';
+                                        }
+                                    }
+                                },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Speed (Mbps)'
+                            },
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        async function fetchData() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+                
+                document.getElementById('lastUpdate').textContent = 
+                    `Last updated: ${formatTime(data.timestamp)}`;
+                
+                updateStatus(true);
+                
+                if (data.ping) {
+                    createPingCharts(data.ping);
+                } else {
+                    document.getElementById('pingSection').innerHTML = 
+                        '<div class="no-data">No ping data available. Start a ping diagnostic to see results here.</div>';
+                }
+                
+                if (data.speedtest) {
+                    createSpeedtestChart(data.speedtest);
+                } else {
+                    document.getElementById('speedtestSection').innerHTML = 
+                        '<div class="no-data">No speedtest data available. Start a speedtest diagnostic to see results here.</div>';
+                }
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                updateStatus(false);
+                document.getElementById('lastUpdate').textContent = 
+                    'Error loading data. Make sure the dashboard server is running.';
+            }
+        }
+        
+        // Initial load
+        fetchData();
+        
+        // Set up auto-refresh
+        setInterval(fetchData, UPDATE_INTERVAL);
+    </script>
+</body>
+</html>
+
