@@ -1,25 +1,29 @@
-# Ping log files
-ping_log_*.txt
+# Data directory (temporary JSON files for dashboard)
+data/
 
-# Python
+# Log files and visualizations (keep directory structure, ignore contents)
+logs/ping/*.txt
+logs/speedtest/*.txt
+logs/visualizations/*.png
+
+# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-env/
+
+# Virtual environments
 venv/
+env/
 ENV/
-.venv
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
-

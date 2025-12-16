@@ -146,6 +146,8 @@ def calculate_timeouts_per_hour(timeouts):
 def calculate_average_interval_by_hour(timeouts):
     """
     Calculate average interval between timeouts grouped by hour.
+    Only calculates intervals between timeouts that occur on the same day
+    to avoid misleading cross-day intervals.
     
     Returns:
         dict mapping hour (0-23) to average interval in seconds
@@ -162,10 +164,21 @@ def calculate_average_interval_by_hour(timeouts):
             # Sort timeouts by time
             sorted_timeouts = sorted(hour_timeouts)
             intervals = []
+            
+            # Only calculate intervals between timeouts on the same day
+            # to avoid misleading cross-day intervals (e.g., 14:50 Day 1 to 14:10 Day 2)
             for i in range(1, len(sorted_timeouts)):
+                prev_timeout = sorted_timeouts[i-1]
+                curr_timeout = sorted_timeouts[i]
+                
                 # Calculate interval in seconds
-                interval = (sorted_timeouts[i] - sorted_timeouts[i-1]).total_seconds()
-                intervals.append(interval)
+                interval = (curr_timeout - prev_timeout).total_seconds()
+                
+                # Only include intervals that are within the same day (less than 2 hours)
+                # This filters out cross-day intervals while allowing same-day intervals
+                # that might span slightly into the next hour
+                if interval < 2 * 3600:  # Less than 2 hours
+                    intervals.append(interval)
             
             if intervals:
                 hourly_intervals[hour] = statistics.mean(intervals)
@@ -179,16 +192,45 @@ def find_ping_log_files(directory='.'):
     """
     Find all ping diagnostic log files in the directory.
     Looks for files matching pattern: *_ping_*.txt
+    
+    Returns:
+        list of Path objects for matching log files
+    
+    Raises:
+        FileNotFoundError: if the directory doesn't exist
+        NotADirectoryError: if the path exists but is not a directory
+        PermissionError: if permission is denied accessing the directory
     """
     directory_path = Path(directory)
+    
+    # Check if directory exists
+    if not directory_path.exists():
+        raise FileNotFoundError(f"Directory not found: {directory}")
+    
+    # Check if it's actually a directory
+    if not directory_path.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {directory}")
+    
     log_files = []
     
     # Pattern: anything_ping_anything.txt
     pattern = re.compile(r'.*_ping_.*\.txt$', re.IGNORECASE)
     
-    for file in directory_path.iterdir():
-        if file.is_file() and pattern.match(file.name):
-            log_files.append(file)
+    # Wrap iterdir() in try-except to handle potential race conditions
+    # (directory could be deleted between exists() check and iterdir() call)
+    # and other OS-level errors
+    try:
+        for file in directory_path.iterdir():
+            if file.is_file() and pattern.match(file.name):
+                log_files.append(file)
+    except FileNotFoundError as e:
+        # Handle race condition: directory deleted between check and iterdir()
+        raise FileNotFoundError(f"Directory not found or was deleted: {directory}") from e
+    except PermissionError as e:
+        raise PermissionError(f"Permission denied accessing directory: {directory}") from e
+    except OSError as e:
+        # Catch other OS-level errors (e.g., network drive disconnected, etc.)
+        raise OSError(f"Error accessing directory {directory}: {e}") from e
     
     return sorted(log_files)
 
@@ -386,7 +428,24 @@ Examples:
     print()
     
     # Find all ping log files
-    log_files = find_ping_log_files(args.directory)
+    try:
+        log_files = find_ping_log_files(args.directory)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print(f"Please check that the directory exists: {args.directory}")
+        return
+    except NotADirectoryError as e:
+        print(f"Error: {e}")
+        print(f"Please provide a valid directory path: {args.directory}")
+        return
+    except PermissionError as e:
+        print(f"Error: {e}")
+        print(f"Please check that you have permission to access: {args.directory}")
+        return
+    except OSError as e:
+        print(f"Error: {e}")
+        print(f"Please check that the directory is accessible: {args.directory}")
+        return
     
     if not log_files:
         print(f"No ping log files found in {args.directory}")
