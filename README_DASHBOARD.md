@@ -32,6 +32,16 @@ python dashboard_server.py -p 8080
 http://localhost:5000  # or your custom port
 ```
 
+### Connect to Pi Monitor (Remote)
+
+To view data from a **Pi Monitor** daemon running on a Raspberry Pi:
+
+```bash
+python dashboard_server.py --api-url http://PI_IP:5001
+```
+
+Replace `PI_IP` with your Pi's IP (e.g. `192.168.1.10`). The dashboard will fetch from the Pi's API instead of local files. You can also set `DASHBOARD_API_URL` environment variable.
+
 ## Usage
 
 ### Running Tests with Dashboard

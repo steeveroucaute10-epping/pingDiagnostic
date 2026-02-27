@@ -1,0 +1,20 @@
+[Unit]
+Description=Pi Network Monitor - persistent ping and speedtest diagnostics
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+# Clone location: ~/.nanobot/workspace/skills/pi-network-monitor/
+# Adjust WorkingDirectory and ExecStart if you clone elsewhere
+WorkingDirectory=/home/pi/.nanobot/workspace/skills/pi-network-monitor
+ExecStart=/home/pi/nanobot-venv/bin/python -m pi_monitor.daemon
+Restart=always
+RestartSec=10
+# Optional: override config via environment
+# Environment=PING_TARGETS=192.168.1.1,8.8.8.8
+# Environment=SPEEDTEST_INTERVAL=15
+
+[Install]
+WantedBy=multi-user.target

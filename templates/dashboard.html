@@ -197,6 +197,9 @@
         <div class="header">
             <div>
                 <h1>Network Diagnostic Dashboard</h1>
+                {% if api_base_url %}
+                <div style="font-size: 12px; color: #667eea; margin-bottom: 4px;">📡 Pi Monitor: {{ api_base_url }}</div>
+                {% endif %}
                 <div class="computer-name" id="computerName">Loading computer name...</div>
                 <div class="last-update" id="lastUpdate">Loading...</div>
             </div>
@@ -586,8 +589,12 @@
                 const response = await fetch('/api/data');
                 const data = await response.json();
                 
-                document.getElementById('lastUpdate').textContent = 
-                    `Last updated: ${formatTime(data.timestamp)}`;
+                if (data.error) {
+                    document.getElementById('lastUpdate').textContent = data.error;
+                } else {
+                    document.getElementById('lastUpdate').textContent = 
+                        `Last updated: ${formatTime(data.timestamp)}`;
+                }
                 
                 // Extract and display computer name (prefer ping, fallback to speedtest)
                 const computerName = data.ping?.computer_name || data.speedtest?.computer_name || 'Unknown';

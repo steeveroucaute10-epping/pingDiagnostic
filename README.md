@@ -295,6 +295,18 @@ The log file also contains an **“Insights & Guidance”** section with human-r
 5. **Note the time of issues**: The timestamps (NTP-adjusted) will help correlate with your experience across multiple computers
 6. **Common Eero gateway IPs**: `192.168.1.1`, `192.168.4.1`, or auto-detected
 
+## Pi Monitor (Raspberry Pi / Debian)
+
+For **permanent** monitoring on a Raspberry Pi with **long-term persistence** and **nanobot MCP integration**:
+
+- Runs ping and speedtest diagnostics continuously as a systemd service
+- Persists data to SQLite for multi-day/week analysis
+- Exposes MCP tools so [nanobot](https://github.com/HKUDS/nanobot) can query outages, speed stability, and latency
+
+**Setup**: See [pi_monitor/SETUP_PI.md](pi_monitor/SETUP_PI.md) for clone, install, systemd, and nanobot config.
+
+**MCP tools** (when configured): `ping_outage_report`, `speedtest_summary`, `latency_summary`, `weekly_network_report`
+
 ## Troubleshooting
 
 - **Permission errors**: Make sure you have write permissions in the directory
