@@ -301,11 +301,17 @@ For **permanent** monitoring on a Raspberry Pi with **long-term persistence** an
 
 - Runs ping and speedtest diagnostics continuously as a systemd service
 - Persists data to SQLite for multi-day/week analysis
+- **Storage management**: 30-day retention (configurable), automatic cleanup and VACUUM
+- **Dashboard UI**: HTTP API on port 5001; connect from any device with `dashboard_server.py --api-url http://PI_IP:5001`
 - Exposes MCP tools so [nanobot](https://github.com/HKUDS/nanobot) can query outages, speed stability, and latency
 
-**Setup**: See [pi_monitor/SETUP_PI.md](pi_monitor/SETUP_PI.md) for clone, install, systemd, and nanobot config.
+**Setup & config**: See [pi_monitor/SETUP_PI.md](pi_monitor/SETUP_PI.md) for clone, install, systemd, and nanobot config.
 
-**MCP tools** (when configured): `ping_outage_report`, `speedtest_summary`, `latency_summary`, `weekly_network_report`
+**Config file**: `pi_monitor/config.json` — copy from `pi_monitor/config.example.json`, then edit `ping_targets`, `retention_days`, etc.
+
+**MCP tools** (when configured): `ping_outage_report`, `speedtest_summary`, `latency_summary`, `weekly_network_report`, `storage_stats`
+
+**Exec fallback** (without MCP): `python -m pi_monitor.report_cli --days 7` prints a report to stdout.
 
 ## Troubleshooting
 
