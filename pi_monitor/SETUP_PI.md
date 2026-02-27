@@ -12,10 +12,9 @@ Run ping and speedtest diagnostics permanently on a Raspberry Pi (Debian), persi
 
 ```bash
 cd ~/.nanobot/workspace/skills
-git clone https://github.com/YOUR_ORG/pingDiagnostic.git pi-network-monitor
+git clone https://github.com/steeveroucaute10-epping/pingDiagnostic.git pi-network-monitor
 cd pi-network-monitor
 ```
-Replace `YOUR_ORG` with your GitHub user or org (e.g. `steev`).
 
 ## 2. Install Dependencies
 
