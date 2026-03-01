@@ -1,6 +1,6 @@
 [Unit]
 Description=Pi Monitor API - HTTP API for dashboard (reads from pi_monitor DB)
-After=network-online.target
+After=network-online.target pi-monitor.service
 Wants=network-online.target
 
 [Service]

@@ -121,7 +121,6 @@ def get_speedtest_data():
 
 
 if __name__ == '__main__':
-    global API_BASE_URL
     parser = argparse.ArgumentParser(description='Dashboard Web Server for Ping and Speedtest Diagnostics')
     parser.add_argument(
         '--port', '-p',

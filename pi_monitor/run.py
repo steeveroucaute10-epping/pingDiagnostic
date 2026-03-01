@@ -27,6 +27,10 @@ from pi_monitor.storage import (
     get_latency_summary,
     get_weekly_report,
     get_db_stats,
+    resolve_time_range,
+    get_outages,
+    get_outage_intervals,
+    get_outage_duration_stats,
 )
 
 
@@ -102,6 +106,64 @@ def storage_stats() -> str:
         stats = get_db_stats(conn)
     stats["db_path"] = str(db_path)
     return json.dumps(stats, indent=2)
+
+
+@mcp.tool
+def list_outages(
+    days: Optional[int] = 7,
+    hours: Optional[float] = None,
+    date: Optional[str] = None,
+) -> str:
+    """
+    List network outage events. Use at most one of: days, hours, or date.
+    Precedence: date > hours > days (default 7).
+    date can be 'YYYY-MM-DD' or 'yesterday'.
+    """
+    db_path = _get_db_path()
+    if not db_path.exists():
+        return json.dumps({"error": "No database found. Is the pi_monitor daemon running?"})
+    since, until = resolve_time_range(days=days, hours=hours, date=date)
+    with get_connection(db_path) as conn:
+        outages = get_outages(conn, since, until)
+    return json.dumps(outages, indent=2)
+
+
+@mcp.tool
+def outage_intervals(
+    days: Optional[int] = 7,
+    hours: Optional[float] = None,
+    date: Optional[str] = None,
+) -> str:
+    """
+    Get timespans between consecutive outage events and median interval.
+    Same date filters as list_outages.
+    """
+    db_path = _get_db_path()
+    if not db_path.exists():
+        return json.dumps({"error": "No database found. Is the pi_monitor daemon running?"})
+    since, until = resolve_time_range(days=days, hours=hours, date=date)
+    with get_connection(db_path) as conn:
+        result = get_outage_intervals(conn, since, until)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool
+def outage_duration_stats(
+    days: Optional[int] = 7,
+    hours: Optional[float] = None,
+    date: Optional[str] = None,
+) -> str:
+    """
+    Get duration statistics for outages: median, min, max, avg, 96th percentile.
+    Same date filters as list_outages.
+    """
+    db_path = _get_db_path()
+    if not db_path.exists():
+        return json.dumps({"error": "No database found. Is the pi_monitor daemon running?"})
+    since, until = resolve_time_range(days=days, hours=hours, date=date)
+    with get_connection(db_path) as conn:
+        result = get_outage_duration_stats(conn, since, until)
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool

@@ -103,6 +103,41 @@ sudo systemctl restart nanobot.service
   /home/pi/nanobot-venv/bin/python -m pi_monitor.report_cli --days 7
   ```
 
+## Upgrading to the Latest Version
+
+When a new version is released, run these steps on the Pi to upgrade:
+
+```bash
+cd ~/.nanobot/workspace/skills/pi-network-monitor
+git pull origin main   # or 'master' if that's your default branch
+/home/pi/nanobot-venv/bin/pip install -r requirements.txt
+sudo systemctl daemon-reload
+sudo systemctl restart pi-monitor.service
+```
+
+If you use the API service:
+
+```bash
+sudo cp pi_monitor/systemd/pi-monitor-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart pi-monitor-api.service
+```
+
+Restart nanobot so it picks up any new MCP tools:
+
+```bash
+sudo systemctl restart nanobot.service
+```
+
+If new MCP tools don't appear after upgrade, clear session cache:
+
+```bash
+rm ~/.nanobot/workspace/sessions/*.json
+sudo systemctl restart nanobot.service
+```
+
+**Config changes:** If `pi_monitor/config.example.json` adds new keys (e.g. `ping_timeout_seconds`, `outage_min_consecutive_timeouts`), merge them into your `pi_monitor/config.json` manually. The daemon uses defaults for missing keys.
+
 ## Dashboard UI (Local Network)
 
 To view stats in a browser from any device on your network:
@@ -116,6 +151,7 @@ To view stats in a browser from any device on your network:
    Or enable the API service:
    ```bash
    sudo cp pi_monitor/systemd/pi-monitor-api.service /etc/systemd/system/
+   sudo systemctl daemon-reload
    sudo systemctl enable pi-monitor-api.service
    sudo systemctl start pi-monitor-api.service
    ```
@@ -146,9 +182,13 @@ You can also set `DASHBOARD_API_URL=http://PI_IP:5001` instead of `--api-url`.
 | Tool | Description |
 |------|-------------|
 | `ping_outage_report` | Outage stats (count, uptime %, outages/day) for last N days |
+| `list_outages` | List outage events (days, hours, or date like `yesterday`) |
+| `outage_intervals` | Intervals between outages and median interval |
+| `outage_duration_stats` | Duration stats: median, min, max, avg, p96 |
 | `speedtest_summary` | Download/upload stats and stability |
 | `latency_summary` | Ping latency (avg, min, max) |
 | `weekly_network_report` | Combined human-readable report |
+| `storage_stats` | Row counts and DB path |
 
 Example questions for nanobot: "What were the network outages last week?", "How stable is my internet speed?", "Give me a weekly network report."
 

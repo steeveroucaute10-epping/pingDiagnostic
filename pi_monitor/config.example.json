@@ -1,13 +1,1 @@
-{
-  "ping_targets": ["192.168.1.1", "8.8.8.8"],
-  "ping_interval_seconds": 1,
-  "speedtest_interval_minutes": 15,
-  "computer_name": null,
-  "data_dir": null,
-  "db_path": null,
-  "retention_days": 30,
-  "vacuum_after_cleanup": true,
-  "api_enabled": true,
-  "api_port": 5001,
-  "api_host": "0.0.0.0"
-}
+{"ping_targets":["192.168.1.1","8.8.8.8"],"ping_interval_seconds":1,"ping_timeout_seconds":2,"outage_min_consecutive_timeouts":10,"speedtest_interval_minutes":15,"computer_name":null,"data_dir":null,"db_path":null,"retention_days":30,"vacuum_after_cleanup":true,"api_enabled":true,"api_port":5001,"api_host":"0.0.0.0"}

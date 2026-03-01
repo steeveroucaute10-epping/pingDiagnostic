@@ -24,6 +24,8 @@ def load_config() -> dict:
     defaults = {
         "ping_targets": ["192.168.1.1", "8.8.8.8"],
         "ping_interval_seconds": 1,
+        "ping_timeout_seconds": 2.0,
+        "outage_min_consecutive_timeouts": 10,
         "speedtest_interval_minutes": 15,
         "computer_name": None,
         "data_dir": None,

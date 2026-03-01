@@ -20,12 +20,15 @@ If the MCP server is configured, use these tools:
 | Tool | Purpose |
 |------|---------|
 | `ping_outage_report` | Outage count, success rate, uptime %, outages per day |
+| `list_outages` | List outage events with date filters (days, hours, or date like `yesterday`) |
+| `outage_intervals` | Timespans between consecutive outages and median interval |
+| `outage_duration_stats` | Duration stats: median, min, max, avg, 96th percentile |
 | `speedtest_summary` | Download/upload stats, stability over N days |
 | `latency_summary` | Ping latency (avg, min, max) for successful pings |
 | `weekly_network_report` | Combined human-readable report |
 | `storage_stats` | Row counts and DB path (for monitoring retention) |
 
-Example: "What were the network outages last week?" → use `ping_outage_report(days=7)` or `weekly_network_report(days=7)`.
+Example: "What were the network outages last week?" → use `list_outages(days=7)` or `ping_outage_report(days=7)` or `weekly_network_report(days=7)`.
 
 ## Exec Fallback
 

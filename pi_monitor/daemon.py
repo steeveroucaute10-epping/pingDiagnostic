@@ -25,6 +25,8 @@ from pi_monitor.storage import (
     init_schema,
     insert_ping,
     insert_speedtest,
+    insert_network_event,
+    detect_affected_targets,
     delete_old_data,
     run_vacuum,
     get_db_stats,
@@ -67,15 +69,15 @@ def get_time_offset() -> float:
         return 0.0
 
 
-def run_ping(target_ip: str, platform: str) -> dict:
-    """Run a single ping and return status, duration_ms."""
+def run_ping(target_ip: str, platform: str, timeout_sec: float = 2.0) -> dict:
+    """Run a single ping and return status, duration_ms. Uses strict timeout to avoid hanging when interface fails."""
     try:
         if platform == "windows":
             cmd = f"ping -n 1 -w 1000 {target_ip}"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout_sec)
         else:
             cmd = ["ping", "-c", "1", "-W", "1", target_ip]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
 
         output = result.stdout + result.stderr
         output_lower = output.lower()
@@ -90,6 +92,8 @@ def run_ping(target_ip: str, platform: str) -> dict:
             return {"status": "timeout", "duration_ms": None}
         else:
             return {"status": "unreachable", "duration_ms": None}
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "duration_ms": None}
     except Exception:
         return {"status": "error", "duration_ms": None}
 
@@ -131,16 +135,23 @@ def ping_worker(config: dict, db_path: Path, stop_event: threading.Event) -> Non
     """Background thread: continuous ping to all targets."""
     targets = config.get("ping_targets", ["192.168.1.1", "8.8.8.8"])
     interval = config.get("ping_interval_seconds", 1)
+    ping_timeout = config.get("ping_timeout_seconds", 2.0)
+    min_consecutive = config.get("outage_min_consecutive_timeouts", 10)
     computer = config.get("computer_name") or get_computer_name()
     time_offset = get_time_offset()
     platform = "windows" if os.name == "nt" else "linux"
 
+    # Outage detection state: per-target consecutive timeout count and outage start
+    outage_state = {t: {"consecutive": 0, "start_ts": None} for t in targets}
+
     while not stop_event.is_set():
         sync_time = datetime.now(timezone.utc) - timedelta(seconds=time_offset)
+        cycle_results = {t: None for t in targets}
         for target in targets:
             if stop_event.is_set():
                 break
-            result = run_ping(target, platform)
+            result = run_ping(target, platform, timeout_sec=ping_timeout)
+            cycle_results[target] = result
             try:
                 with get_connection(db_path) as conn:
                     init_schema(conn)
@@ -154,6 +165,43 @@ def ping_worker(config: dict, db_path: Path, stop_event: threading.Event) -> Non
                     )
             except Exception as e:
                 print(f"[ping] DB error: {e}", file=sys.stderr)
+
+            # Outage detection: track consecutive timeouts
+            if result["status"] in ("timeout", "error", "unreachable"):
+                outage_state[target]["consecutive"] += 1
+                if outage_state[target]["start_ts"] is None and outage_state[target]["consecutive"] >= min_consecutive:
+                    # First cycle where we hit 10+ consecutive - start_ts was set at cycle 10
+                    # We need to backdate to when we first hit 10
+                    outage_state[target]["start_ts"] = sync_time - timedelta(seconds=(outage_state[target]["consecutive"] - 1) * interval)
+            else:
+                if outage_state[target]["consecutive"] >= min_consecutive and outage_state[target]["start_ts"] is not None:
+                    # Outage ended - record event
+                    end_ts = sync_time
+                    start_ts = outage_state[target]["start_ts"]
+                    duration = (end_ts - start_ts).total_seconds()
+                    try:
+                        with get_connection(db_path) as conn:
+                            affected = detect_affected_targets(
+                                conn, start_ts, end_ts, targets, target
+                            )
+                            event_type = {
+                                "both": "MESH_FAILURE",
+                                "gateway": "LOCAL_OUTAGE",
+                                "internet": "INTERNET_OUTAGE",
+                            }[affected]
+                            insert_network_event(
+                                conn,
+                                event_type,
+                                start_ts,
+                                end_ts,
+                                duration,
+                                affected,
+                            )
+                    except Exception as ex:
+                        print(f"[outage] Error recording event: {ex}", file=sys.stderr)
+                outage_state[target]["consecutive"] = 0
+                outage_state[target]["start_ts"] = None
+
         stop_event.wait(interval)
 
 
@@ -202,10 +250,11 @@ def cleanup_worker(db_path: Path, config: dict, stop_event: threading.Event) -> 
         try:
             with get_connection(db_path) as conn:
                 deleted = delete_old_data(conn, retention_days=retention)
-                total = deleted["ping_deleted"] + deleted["speedtest_deleted"]
+                total = deleted["ping_deleted"] + deleted["speedtest_deleted"] + deleted.get("events_deleted", 0)
                 if total > 0:
                     print(f"[cleanup] Deleted {deleted['ping_deleted']} ping, "
-                          f"{deleted['speedtest_deleted']} speedtest rows (>{retention}d old)")
+                          f"{deleted['speedtest_deleted']} speedtest, "
+                          f"{deleted.get('events_deleted', 0)} events (>{retention}d old)")
                     if vacuum:
                         run_vacuum(conn)
                         print("[cleanup] VACUUM completed")
@@ -220,15 +269,16 @@ def run_startup_cleanup(db_path: Path, config: dict) -> None:
     try:
         with get_connection(db_path) as conn:
             deleted = delete_old_data(conn, retention_days=retention)
-            total = deleted["ping_deleted"] + deleted["speedtest_deleted"]
+            total = deleted["ping_deleted"] + deleted["speedtest_deleted"] + deleted.get("events_deleted", 0)
             if total > 0:
                 print(f"[startup] Cleanup: deleted {deleted['ping_deleted']} ping, "
-                      f"{deleted['speedtest_deleted']} speedtest rows (>{retention}d old)")
+                      f"{deleted['speedtest_deleted']} speedtest, "
+                      f"{deleted.get('events_deleted', 0)} events (>{retention}d old)")
                 if vacuum:
                     run_vacuum(conn)
                     print("[startup] VACUUM completed")
             stats = get_db_stats(conn)
-            print(f"[startup] DB: {stats['ping_rows']} ping rows, {stats['speedtest_rows']} speedtest rows")
+            print(f"[startup] DB: {stats['ping_rows']} ping rows, {stats['speedtest_rows']} speedtest, {stats.get('events_rows', 0)} events")
     except Exception as e:
         print(f"[startup] Cleanup error: {e}", file=sys.stderr)
 

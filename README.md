@@ -309,7 +309,7 @@ For **permanent** monitoring on a Raspberry Pi with **long-term persistence** an
 
 **Config file**: `pi_monitor/config.json` — copy from `pi_monitor/config.example.json`, then edit `ping_targets`, `retention_days`, etc.
 
-**MCP tools** (when configured): `ping_outage_report`, `speedtest_summary`, `latency_summary`, `weekly_network_report`, `storage_stats`
+**MCP tools** (when configured): `ping_outage_report`, `list_outages`, `outage_intervals`, `outage_duration_stats`, `speedtest_summary`, `latency_summary`, `weekly_network_report`, `storage_stats`
 
 **Exec fallback** (without MCP): `python -m pi_monitor.report_cli --days 7` prints a report to stdout.
 
